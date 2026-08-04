@@ -35,9 +35,16 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
+        // 支持 ALCHEMY_API_KEY 或完整的 POLYGON_WS_URL
+        let polygon_ws_url = if let Ok(api_key) = env::var("ALCHEMY_API_KEY") {
+            format!("wss://polygon-mainnet.g.alchemy.com/v2/{}", api_key)
+        } else {
+            env::var("POLYGON_WS_URL")
+                .context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?
+        };
+
         let config = Self {
-            polygon_ws_url: env::var("POLYGON_WS_URL")
-                .context("POLYGON_WS_URL 环境变量未设置")?,
+            polygon_ws_url,
 
             target_wallet: env::var("TARGET_WALLET")
                 .context("TARGET_WALLET 环境变量未设置")?,
