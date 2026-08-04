@@ -5,11 +5,13 @@ mod api;
 mod config;
 mod db;
 mod listener;
+mod redeem;
 mod trader;
 
 use crate::config::Config;
 use crate::db::Database;
 use crate::listener::Listener;
+use crate::redeem::{RedeemConfig, Redeemer};
 use crate::trader::CopyTrader;
 use anyhow::Result;
 use clap::Parser;
@@ -71,6 +73,34 @@ async fn main() -> Result<()> {
 
     tracing::info!("✅ 监听器启动成功");
     tracing::info!("📡 等待目标钱包交易...\n");
+
+    // 自动赎回后台任务（仅在真实交易模式启用）
+    if !args.watch_only {
+        let redeem_config = RedeemConfig {
+            enabled: config.redeem_enabled,
+            scan_interval_secs: config.redeem_scan_interval,
+            min_redeem_amount: config.redeem_min_amount,
+            polygon_rpc_url: config.polygon_rpc_url.clone().unwrap_or_default(),
+        };
+
+        if redeem_config.enabled {
+            match Redeemer::new(&config.private_key, redeem_config) {
+                Ok(redeemer) => {
+                    tracing::info!("🔄 自动赎回已启用，启动后台赎回任务");
+                    tokio::spawn(async move {
+                        if let Err(e) = redeemer.run().await {
+                            tracing::error!("❌ 自动赎回错误: {}", e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("❌ 自动赎回初始化失败: {}", e);
+                }
+            }
+        } else {
+            tracing::info!("⏸️ 自动赎回未启用（设置 REDEEM_ENABLED=true 开启）");
+        }
+    }
 
     if args.watch_only {
         tracing::info!("👁️ 监控模式");

@@ -68,6 +68,10 @@ nano .env
 | `POLYGON_WS_URL` | Alchemy Polygon WebSocket | [Alchemy Dashboard](https://dashboard.alchemy.com/) |
 | `PRIVATE_KEY` | MetaMask 私钥 | MetaMask → 账户详情 → 导出私钥 |
 | `TARGET_WALLET` | 要跟单的钱包地址（EOA 或其 Gnosis Safe Proxy，可用 `TARGET_WALLETS` 逗号分隔多个） | Polymarket 用户主页 / Polygonscan |
+| `REDEEM_ENABLED` | 是否启用自动赎回（`true`/`false`） | 中奖后自动调用链上 `redeemPositions` |
+| `REDEEM_SCAN_INTERVAL` | 赎回扫描间隔（秒），默认 300 | |
+| `REDEEM_MIN_AMOUNT` | 最小赎回金额，低于此值跳过以节省 Gas，默认 0.10 | |
+| `POLYGON_RPC_URL` | Polygon HTTP RPC（赎回交易用，可选） | 不设置则用 `https://polygon-rpc.com` |
 
 ### 4. 运行
 
@@ -115,12 +119,13 @@ cargo run --release -- --stats
 ```
 polymarket-copy-trader/
 ├── src/
-│   ├── main.rs          # 主入口（CLI + 事件循环）
+│   ├── main.rs          # 主入口（CLI + 事件循环 + 赎回后台任务）
 │   ├── abi.rs           # Polymarket 合约 ABI
 │   ├── api.rs           # Polymarket CLOB API 客户端
 │   ├── config.rs        # 配置管理
 │   ├── db.rs            # 数据库记录
 │   ├── listener.rs      # Polygon WS 监听器
+│   ├── redeem.rs        # 自动赎回（CTF Exchange V2 redeemPositions）
 │   └── trader.rs        # 跟单执行器（风控+下单）
 ├── Cargo.toml           # Rust 依赖
 ├── .env.example         # 环境变量模板

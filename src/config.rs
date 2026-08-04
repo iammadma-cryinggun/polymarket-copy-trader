@@ -32,6 +32,18 @@ pub struct Config {
 
     /// Polymarket CLOB API URL
     pub clob_api_url: String,
+
+    /// 是否启用自动赎回
+    pub redeem_enabled: bool,
+
+    /// 自动赎回扫描间隔（秒）
+    pub redeem_scan_interval: u64,
+
+    /// 最小赎回金额（当前价值低于该值跳过）
+    pub redeem_min_amount: f64,
+
+    /// Polygon HTTP RPC URL（赎回交易用，可选）
+    pub polygon_rpc_url: Option<String>,
 }
 
 impl Config {
@@ -95,6 +107,22 @@ impl Config {
 
             clob_api_url: env::var("CLOB_API_URL")
                 .unwrap_or_else(|_| "https://clob.polymarket.com".to_string()),
+
+            redeem_enabled: env::var("REDEEM_ENABLED")
+                .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                .unwrap_or(false),
+
+            redeem_scan_interval: env::var("REDEEM_SCAN_INTERVAL")
+                .unwrap_or_else(|_| "300".to_string())
+                .parse()
+                .context("REDEEM_SCAN_INTERVAL 解析失败")?,
+
+            redeem_min_amount: env::var("REDEEM_MIN_AMOUNT")
+                .unwrap_or_else(|_| "0.10".to_string())
+                .parse()
+                .context("REDEEM_MIN_AMOUNT 解析失败")?,
+
+            polygon_rpc_url: env::var("POLYGON_RPC_URL").ok(),
         };
 
         // 验证配置
