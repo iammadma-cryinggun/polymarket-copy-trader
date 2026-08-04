@@ -17,8 +17,8 @@ alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", features = 
     "sol-types",
 ] }
 
-# Polymarket SDK (使用本地路径)
-polymarket-client-sdk = { path = "../btc_doomsday_rust_final/rs-clob-client" }
+# Polymarket SDK (官方仓库)
+polymarket-client-sdk = { git = "https://github.com/polymarket/rs-clob-client", tag = "v0.4.4" }
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
