@@ -9,8 +9,8 @@ authors = ["Martin <martin@example.com>"]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Blockchain - 最小化 alloy 依赖
-alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", default-features = false, features = [
+# Blockchain - 使用与 polymarket-client-sdk 相同的版本
+alloy = { version = "0.6", default-features = false, features = [
     "provider-ws",
     "signer-local",
     "rpc-types-eth",
