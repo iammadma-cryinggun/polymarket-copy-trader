@@ -8,8 +8,12 @@ pub struct Config {
     /// Polygon WebSocket URL (Alchemy/QuickNode)
     pub polygon_ws_url: String,
 
-    /// 目标钱包地址（要跟单的地址）
+    /// 目标钱包地址（要跟单的地址，兼容 EOA 与 Gnosis Safe Proxy）
+    /// 支持逗号分隔的多个地址
     pub target_wallet: String,
+
+    /// 目标钱包地址列表（兼容 EOA 与其对应的 Gnosis Safe Proxy）
+    pub target_wallets: Vec<String>,
 
     /// 私钥（用于签名交易）
     pub private_key: String,
@@ -47,8 +51,8 @@ impl Config {
                 format!("wss://polygon-mainnet.g.alchemy.com/v2/{}", api_key)
             }
         } else {
-            let url = env::var("POLYGON_WS_URL")
-                .context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?;
+            let url =
+                env::var("POLYGON_WS_URL").context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?;
             // 同样转换 POLYGON_WS_URL
             if url.starts_with("https://") {
                 url.replace("https://", "wss://")
@@ -62,14 +66,18 @@ impl Config {
         let config = Self {
             polygon_ws_url,
 
-            target_wallet: env::var("TARGET_WALLET")
-                .context("TARGET_WALLET 环境变量未设置")?,
+            target_wallet: env::var("TARGET_WALLET").context("TARGET_WALLET 环境变量未设置")?,
+            target_wallets: env::var("TARGET_WALLETS")
+                .unwrap_or_else(|_| env::var("TARGET_WALLET").unwrap_or_default())
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
 
-            private_key: env::var("PRIVATE_KEY")
-                .context("PRIVATE_KEY 环境变量未设置")?,
+            private_key: env::var("PRIVATE_KEY").context("PRIVATE_KEY 环境变量未设置")?,
 
             copy_trade_amount: env::var("COPY_TRADE_AMOUNT")
-                .unwrap_or_else(|_| "20".to_string())
+                .unwrap_or_else(|_| "10".to_string())
                 .parse()
                 .context("COPY_TRADE_AMOUNT 解析失败")?,
 
@@ -83,8 +91,7 @@ impl Config {
                 .parse()
                 .context("MIN_REMAINING_TIME 解析失败")?,
 
-            db_path: env::var("DB_PATH")
-                .unwrap_or_else(|_| "copy_trades.db".to_string()),
+            db_path: env::var("DB_PATH").unwrap_or_else(|_| "copy_trades.db".to_string()),
 
             clob_api_url: env::var("CLOB_API_URL")
                 .unwrap_or_else(|_| "https://clob.polymarket.com".to_string()),
@@ -101,6 +108,13 @@ impl Config {
         // 验证目标钱包地址格式
         if !self.target_wallet.starts_with("0x") || self.target_wallet.len() != 42 {
             anyhow::bail!("TARGET_WALLET 格式无效，应为 0x 开头的 42 字符地址");
+        }
+
+        // 验证附加钱包地址格式
+        for w in &self.target_wallets {
+            if !w.starts_with("0x") || w.len() != 42 {
+                anyhow::bail!("TARGET_WALLETS 中存在无效地址: {}", w);
+            }
         }
 
         // 验证滑点范围

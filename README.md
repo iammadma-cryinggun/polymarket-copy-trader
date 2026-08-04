@@ -67,7 +67,7 @@ nano .env
 |------|------|----------|
 | `POLYGON_WS_URL` | Alchemy Polygon WebSocket | [Alchemy Dashboard](https://dashboard.alchemy.com/) |
 | `PRIVATE_KEY` | MetaMask 私钥 | MetaMask → 账户详情 → 导出私钥 |
-| `TARGET_WALLET` | 要跟单的钱包地址 | Polymarket 用户主页 |
+| `TARGET_WALLET` | 要跟单的钱包地址（EOA 或其 Gnosis Safe Proxy，可用 `TARGET_WALLETS` 逗号分隔多个） | Polymarket 用户主页 / Polygonscan |
 
 ### 4. 运行
 
@@ -132,8 +132,10 @@ polymarket-copy-trader/
 
 | 合约 | 地址 | 说明 |
 |------|------|------|
-| CTF Exchange | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | Polymarket 主交易所 |
-| NegRisk Exchange | `0xd91E40c3570878C357392B0C93bF2C93f5b18D54` | 新版交易所 |
+| CTF Exchange V1 | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | 旧版主交易所（流量已下降） |
+| NegRisk Exchange V1 | `0xd91E40c3570878C357392B0C93bF2C93f5b18D54` | 旧版交易所 |
+| CTF Exchange V2 | `0xE111180000d2663C0091e4f400237545B87B996B` | 当前主力交易所 |
+| NegRisk Exchange V2 | `0xe2222d279d744050d28e00520010520000310F59` | 短线/多选项市场主力 |
 
 ## 📊 性能指标
 

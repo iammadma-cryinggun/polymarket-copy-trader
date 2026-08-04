@@ -11,7 +11,7 @@ services:
     env:
       # 必填项
       TARGET_WALLET: "0xf418d3a1a941292f9c8707d62a14980c5beb95a3"
-      COPY_TRADE_AMOUNT: "20"
+      COPY_TRADE_AMOUNT: "10"
       MAX_SLIPPAGE: "0.15"
       MIN_REMAINING_TIME: "30"
       RUST_LOG: "info"
