@@ -1,208 +1,160 @@
-# 山寨币轧空监控机器人 - Zeabur 部署指南
+# Polymarket Copy Trader
 
-## 📋 文件清单
+🚀 **实时链上跟单机器人** - 通过 Polygon RPC WebSocket 监听，实现 1.5 秒级跟单
+
+## 📊 架构
 
 ```
-C:\Users\Martin\Downloads\机器人\轧空\
-├── squeeze_monitor.py      # 主程序
-├── requirements.txt        # Python 依赖
-├── Dockerfile              # Docker 配置
-├── zeabur.yaml            # Zeabur 配置
-└── README.md              # 部署指南（本文件）
+┌─────────────────────────────────────────────────────────┐
+│              Polygon RPC WebSocket 监听                 │
+├─────────────────────────────────────────────────────────┤
+│  Alchemy WebSocket                                      │
+│       │                                                  │
+│       ▼                                                  │
+│  eth_subscribe("logs", {                                │
+│      address: CTF_EXCHANGE,                             │
+│      event: OrderFilled                                 │
+│  })                                                      │
+│       │                                                  │
+│       ▼                                                  │
+│  过滤目标钱包: 0xf418...                                 │
+│       │                                                  │
+│       ▼                                                  │
+│  风控检查 → 滑点检查 → 执行跟单                          │
+└─────────────────────────────────────────────────────────┘
 ```
 
----
+## 🎯 核心优势
 
-## 🚀 Zeabur 部署步骤
+| 对比项 | HTTP 轮询 | **链上 WS 监听** |
+|--------|-----------|-----------------|
+| 延迟 | 4-6 秒 | **1.5-2 秒** |
+| 稳定性 | 易被封 IP | **长连接稳定** |
+| 适用场景 | 长周期市场 | **5分钟高频** |
 
-### 1. 注册 Zeabur 账号
+## 🛠️ 快速开始
 
-1. 访问：https://zeabur.com
-2. 使用 GitHub 账号登录
-3. 创建新项目
-
-### 2. 创建服务
-
-**方式一：使用 Zeabur CLI（推荐）**
+### 1. 安装依赖
 
 ```bash
-# 安装 Zeabur CLI
-npm install -g @zeabur/cli
+# 克隆项目
+git clone https://github.com/yourusername/polymarket-copy-trader.git
+cd polymarket-copy-trader
 
-# 登录
-zeabur login
+# 复制配置文件
+cp .env.example .env
 
-# 创建项目
-zeabur init
-
-# 部署
-cd "C:\Users\Martin\Downloads\机器人\轧空"
-zeabur deploy
+# 编辑配置
+nano .env
 ```
 
-**方式二：使用 GitHub 集成**
-
-1. 将代码上传到 GitHub 仓库
-2. 在 Zeabur 中导入该仓库
-3. Zeabur 会自动识别 `zeabur.yaml` 配置
-4. 点击部署
-
-### 3. 配置环境变量
-
-在 Zeabur 控制台中设置以下环境变量：
-
-**必需配置：**
-- `PROXY`: 你的代理服务器地址（例如：`http://123.45.67.89:7890`）
-  - ⚠️ **重要**：由于币安 API 在国内无法直接访问，必须配置代理
-  - 推荐使用稳定的代理服务（如 AWS/Lightsail/DO 等云服务器搭建）
-
-**可选配置：**
-- `TELEGRAM_TOKEN`: 你的 Bot Token（代码中已配置，可覆盖）
-- `TELEGRAM_CHAT_ID`: 你的 Chat ID（代码中已配置，可覆盖）
-- `WECHAT_SCKEY`: Server酱 Key（代码中已配置，可覆盖）
-
-### 4. 查看日志
-
-部署成功后，可以在 Zeabur 控制台查看实时日志：
+### 2. 配置环境变量
 
 ```bash
-zeabur logs squeeze-monitor
+# Alchemy Polygon WebSocket URL
+POLYGON_WS_URL=wss://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+
+# 目标钱包地址
+TARGET_WALLET=0xf418d3a1a941292f9c8707d62a14980c5beb95a3
+
+# 私钥（用于签名交易）
+PRIVATE_KEY=your_private_key_here
+
+# 跟单金额（USDC）
+COPY_TRADE_AMOUNT=20
+
+# 最大滑点（15%）
+MAX_SLIPPAGE=0.15
+
+# 最小剩余时间（最后30秒不跟单）
+MIN_REMAINING_TIME=30
 ```
 
----
-
-## 🔧 本地测试
-
-在部署到 Zeabur 之前，可以先本地测试：
+### 3. 运行
 
 ```bash
-cd "C:\Users\Martin\Downloads\机器人\轧空"
-python squeeze_monitor.py
+# 监控模式（只看不下单）
+cargo run -- --watch-only
+
+# 跟单模式（自动执行）
+cargo run
+
+# 查看统计
+cargo run -- --stats
 ```
 
----
+## 🛡️ 风控机制
 
-## 📊 监控逻辑
+### 1. 最大滑点拦截
 
-**触发条件**：
-- 资金费率 ≤ -0.1%（极端负值）
-- OI 短期均值（3次）≥ 长期均值（10次）× 2倍
+```
+大户入场价: 0.60
+当前盘口卖一: 0.75
+滑点: (0.75 - 0.60) / 0.60 = 25% > 15% ❌ 放弃跟单
+```
 
-**止盈止损**：
-- TP1: +5%
-- TP2: +10%
-- 止损: -3%
+### 2. 残余时间拦截
 
-**扫描频率**：每 10 分钟
+```
+剩余时间: 25s < 30s ❌ 放弃跟单
+```
 
-**监控范围**：所有 USDT 合约（24h 交易量 > $10M）
-- 💡 **完整扫描**，捕捉更多轧空机会
-- ⚠️ **建议部署到 Zeabur**，避免与本地程序竞争 API 配额
+### 3. 固定金额跟单
 
----
+```
+跟单金额: $20 USDC（不按比例放大）
+```
 
-## 📈 数据持久化
+## 📁 项目结构
 
-程序会在 `/app/data` 目录下创建：
-- `squeeze_signals.json` - 存储所有信号记录
+```
+polymarket-copy-trader/
+├── src/
+│   ├── main.rs          # 主入口
+│   ├── abi.rs           # Polymarket 合约 ABI
+│   ├── config.rs        # 配置管理
+│   ├── db.rs            # 数据库记录
+│   ├── listener.rs      # Polygon WS 监听器
+│   └── trader.rs        # 跟单执行器
+├── Cargo.toml
+├── .env.example
+└── README.md
+```
 
-**注意**：Zeabur Worker 重启后数据会丢失，如需持久化存储，建议：
-1. 定期导出数据
-2. 使用外部数据库（如 Redis）
-3. 或使用 Zeabur 的 Volume 功能
+## 🔧 核心合约
 
----
+| 合约 | 地址 | 说明 |
+|------|------|------|
+| CTF Exchange | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | Polymarket 主交易所 |
+| NegRisk Exchange | `0xd91E40c3570878C357392B0C93bF2C93f5b18D54` | 新版交易所 |
 
-## 💰 成本估算
+## ⚠️ 风险提示
 
-Zeabur 免费套餐：
-- ✅ 512MB RAM
-- ✅ 0.1 CPU 核心
-- ✅ 每月 1000 小时运行时间
+1. **市场风险** - 跟单策略不保证盈利
+2. **延迟风险** - 即使 1.5 秒延迟也可能错过最佳入场
+3. **滑点风险** - 大额交易可能推高价格
+4. **隐私风险** - 链上交易是公开的
 
-对于这个监控机器人，**完全够用且免费**。
+## 📊 性能指标
 
----
+- **监听延迟**: ~1.5 秒（Polygon 区块时间）
+- **下单延迟**: ~0.5 秒
+- **总延迟**: ~2 秒
 
-## ⚠️ 注意事项
+## 📄 License
 
-1. **代理配置**：
-   - ⚠️ **必须配置代理**才能访问币安 API
-   - 推荐使用稳定的云服务器代理（AWS/Lightsail/DO）
-   - 代理格式：`http://IP:PORT` 或 `socks5://IP:PORT`
+MIT
 
-2. **时区设置**：已设置为 `Asia/Shanghai`（UTC+8）
+## 🙋 常见问题
 
-3. **数据持久化**：Worker 重启后内存数据会丢失
+### Q: 为什么不用 Polymarket WebSocket API?
 
-4. **API 限制**：币安 API 有频率限制，已启用 `enableRateLimit`
+A: Polymarket WebSocket 只能订阅**自己账户**的交易，不能监听其他地址。
 
----
+### Q: 为什么选择 Alchemy 节点?
 
-## 🆘 故障排除
+A: Alchemy 提供稳定的 Polygon WebSocket 节点，延迟低、稳定性高。
 
-### 问题 1：程序频繁重启
+### Q: 跟单金额如何设置?
 
-**原因**：内存不足或程序异常退出
-
-**解决**：
-- 查看日志：`zeabur logs squeeze-monitor`
-- 检查代码逻辑
-- 联系技术支持
-
-### 问题 2：收不到 Telegram 通知
-
-**原因**：Token 或 Chat ID 错误
-
-**解决**：
-1. 确认 Token 格式：`数字:字母`
-2. 确认 Chat ID：纯数字
-3. 向 Bot 发送一条消息，确保 Token 有效
-4. 检查网络连接
-
-### 问题 3：数据获取失败
-
-**原因**：代理配置错误或代理不可用
-
-**解决**：
-1. 确认代理地址格式正确：`http://IP:PORT` 或 `socks5://IP:PORT`
-2. 测试代理是否可用：
-   ```bash
-   curl -x http://your-proxy:port https://api.binance.com/api/v3/ping
-   ```
-3. 如果使用 Zeabur 部署，确保代理服务器允许 Zeabur 的 IP 访问
-4. 检查代理服务器日志，确认连接是否成功
-5. 考虑使用云服务器搭建稳定代理（AWS/Lightsail/DO）
-
----
-
-## 📞 技术支持
-
-- Zeabur 文档：https://zeabur.com/docs
-- Zeabur Discord：https://discord.gg/zeabur
-- ccxt 文档：https://docs.ccxt.com
-
----
-
-## ✅ 部署检查清单
-
-- [ ] 已创建 Zeabur 账号
-- [ ] 已配置代理服务器（PROXY 环境变量）
-- [ ] 已测试代理可访问币安 API
-- [ ] 已更新 Telegram Token
-- [ ] 已更新 Telegram Chat ID
-- [ ] 已本地测试通过（需要代理）
-- [ ] 已上传代码到 Zeabur
-- [ ] 已在 Zeabur 中配置 PROXY 环境变量
-- [ ] 已查看日志确认运行正常
-- [ ] 已收到测试通知
-
----
-
-部署完成后，你将：
-✅ 不需要本地电脑运行
-✅ 24/7 自动监控
-✅ 自动收到轧空信号通知
-✅ 自动统计胜率
-
-开始享受云端监控的便利吧！🚀
+A: 建议设置固定金额（如 $20），不要按比例放大，避免资金管理失控。
