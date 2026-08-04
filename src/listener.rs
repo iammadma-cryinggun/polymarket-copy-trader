@@ -6,8 +6,9 @@ use crate::abi::{addresses, event_sigs, CTFExchange};
 use crate::config::Config;
 use crate::db::{Database, TargetTrade};
 use alloy::primitives::{Address, B256};
-use alloy::providers::{Provider, ProviderBuilder, WsConnect};
+use alloy::providers::{ProviderBuilder, WsConnect};
 use alloy::rpc::types::{Filter, Log};
+use alloy::sol_types::SolEvent;
 use anyhow::Result;
 use chrono::Utc;
 use futures::StreamExt;
@@ -28,6 +29,9 @@ pub struct TradeEvent {
 
     /// Token ID
     pub token_id: String,
+
+    /// 交易方向（BUY/SELL）
+    pub side: String,
 
     /// 吃单方数量
     pub taker_amount: u64,
@@ -62,7 +66,7 @@ impl Listener {
 
         // 创建 WebSocket Provider
         let ws = WsConnect::new(&self.config.polygon_ws_url);
-        let provider = ProviderBuilder::new().on_ws(ws).await?;
+        let provider = ProviderBuilder::new().connect_ws(ws).await?;
 
         tracing::info!("✅ Polygon WebSocket 连接成功");
 
@@ -70,15 +74,13 @@ impl Listener {
         let target_wallet: Address = self.config.target_wallet.parse()?;
 
         // 构建日志过滤器
-        // 监听 CTF Exchange 的 OrderFilled 事件
         let ctf_exchange: Address = addresses::CTF_EXCHANGE.parse()?;
         let order_filled_sig = event_sigs::order_filled();
 
         tracing::info!("🎯 开始监听 CTF Exchange: {}", addresses::CTF_EXCHANGE);
         tracing::info!("🎯 目标钱包: {}", self.config.target_wallet);
-        tracing::info!("📡 事件签名: {:?}", order_filled_sig);
 
-        // 创建过滤器：监听 OrderFilled 事件
+        // 创建过滤器
         let filter = Filter::new()
             .address(ctf_exchange)
             .event_signature(order_filled_sig);
@@ -102,10 +104,14 @@ impl Listener {
     /// 处理单条日志
     async fn handle_log(&self, log: &Log, target_wallet: Address) -> Result<()> {
         // 解析 OrderFilled 事件
-        let event = match CTFExchange::OrderFilled::decode_log(log, true) {
+        let event = match CTFExchange::OrderFilled::decode_raw_log(
+            &log.topics,
+            &log.data.data,
+            true,
+        ) {
             Ok(e) => e,
             Err(e) => {
-                tracing::warn!("⚠️ 解析事件失败: {}", e);
+                tracing::debug!("⚠️ 解析事件失败: {}", e);
                 return Ok(());
             }
         };
@@ -115,12 +121,23 @@ impl Listener {
         let is_target_maker = event.maker == target_wallet;
 
         if !is_target_taker && !is_target_maker {
-            // 不是目标钱包的交易，忽略
             return Ok(());
         }
 
         // 记录检测时间
         let detected_at = Utc::now();
+
+        // 判断方向
+        let side = if is_target_taker { "BUY" } else { "SELL" };
+
+        // 计算入场价
+        let maker_amt: u64 = event.makerAmount.to();
+        let taker_amt: u64 = event.takerAmount.to();
+        let entry_price = if maker_amt > 0 {
+            taker_amt as f64 / maker_amt as f64
+        } else {
+            0.0
+        };
 
         // 构建交易事件
         let trade_event = TradeEvent {
@@ -128,64 +145,42 @@ impl Listener {
             taker: event.taker,
             maker: event.maker,
             token_id: event.tokenId.to_string(),
-            taker_amount: event.takerAmount.to(),
-            maker_amount: event.makerAmount.to(),
+            side: side.to_string(),
+            taker_amount: taker_amt,
+            maker_amount: maker_amt,
             block_number: log.block_number.unwrap_or(0),
         };
 
-        // 判断方向
-        let token_side = if is_target_taker {
-            "BUY" // 吃单方买入
-        } else {
-            "SELL" // 挂单方卖出
-        };
-
-        // 计算入场价（近似）
-        // entry_price = taker_amount / maker_amount
-        let entry_price = if event.makerAmount.to::<u64>() > 0 {
-            event.takerAmount.to::<u64>() as f64 / event.makerAmount.to::<u64>() as f64
-        } else {
-            0.0
-        };
-
         tracing::info!(
-            "🔥 [检测到目标交易] TX: {:?} | {} | Token: {} | 价格: {:.4} | 数量: {}",
-            log.transaction_hash.unwrap_or_default(),
-            token_side,
-            event.tokenId,
+            "🔥 [检测到目标交易] TX: {} | {} | Token: {} | 价格: {:.4} | 数量: {}",
+            &trade_event.tx_hash[..20],
+            side,
+            &trade_event.token_id[..20],
             entry_price,
-            event.takerAmount
+            taker_amt
         );
 
         // 记录到数据库
         let target_trade = TargetTrade {
             tx_hash: trade_event.tx_hash.clone(),
             target_wallet: self.config.target_wallet.clone(),
-            market_slug: None, // 需要后续查询
+            market_slug: None,
             token_id: trade_event.token_id.clone(),
-            token_side: token_side.to_string(),
+            token_side: side.to_string(),
             entry_price,
-            size: trade_event.taker_amount as f64,
+            size: taker_amt as f64,
             detected_at,
             followed: false,
             follow_reason: None,
         };
 
-        // 检查是否已记录
         if !self.db.target_trade_exists(&trade_event.tx_hash)? {
             self.db.insert_target_trade(&target_trade)?;
         }
 
-        // 发送事件到跟单逻辑
+        // 发送事件
         self.event_sender.send(trade_event).await?;
 
         Ok(())
     }
-}
-
-/// 解析 Token ID 获取市场信息
-pub fn parse_token_id(token_id: &str) -> Option<(String, bool)> {
-    // Token ID 格式需要从 Polymarket API 获取
-    // 这里返回占位符
-    None
 }

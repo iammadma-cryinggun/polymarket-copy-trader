@@ -9,7 +9,7 @@ authors = ["Martin <martin@example.com>"]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Blockchain - 使用与 polymarket-client-sdk 兼容的版本
+# Blockchain
 alloy = { version = "1", default-features = false, features = [
     "provider-ws",
     "signer-local",
@@ -17,8 +17,8 @@ alloy = { version = "1", default-features = false, features = [
     "sol-types",
 ] }
 
-# Polymarket SDK
-polymarket-client-sdk = { git = "https://github.com/polymarket/rs-clob-client", tag = "v0.4.4" }
+# Polymarket SDK - 启用 clob feature
+polymarket-client-sdk = { git = "https://github.com/polymarket/rs-clob-client", tag = "v0.4.4", features = ["clob"] }
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
