@@ -9,17 +9,15 @@ authors = ["Martin <martin@example.com>"]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Blockchain (alloy for Polygon RPC WebSocket)
-alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", features = [
+# Blockchain - 最小化 alloy 依赖
+alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", default-features = false, features = [
     "provider-ws",
     "signer-local",
     "rpc-types-eth",
     "sol-types",
-    "contract",        # 新增：合约调用
-    "network",         # 新增：网络支持
 ] }
 
-# Polymarket SDK (官方仓库)
+# Polymarket SDK
 polymarket-client-sdk = { git = "https://github.com/polymarket/rs-clob-client", tag = "v0.4.4" }
 
 # Database
@@ -50,10 +48,10 @@ thiserror = "1"
 # Config
 dotenv = "0.15"
 
-# HTTP client (for CLOB API)
+# HTTP client
 reqwest = { version = "0.12", features = ["json"] }
 
-# UUID (for order IDs)
+# UUID
 uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
