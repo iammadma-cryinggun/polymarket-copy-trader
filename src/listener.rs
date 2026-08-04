@@ -43,6 +43,7 @@ impl Listener {
 
     pub async fn run(&self) -> Result<()> {
         tracing::info!("🔗 连接到 Polygon WebSocket...");
+        tracing::info!("📌 URL: {}", &self.config.polygon_ws_url);
 
         let ws = WsConnect::new(&self.config.polygon_ws_url);
         let provider = ProviderBuilder::new().connect_ws(ws).await?;
