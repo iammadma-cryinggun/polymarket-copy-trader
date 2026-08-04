@@ -3,6 +3,7 @@
 //! 实时监听 Polygon 链上交易，自动跟单
 
 mod abi;
+mod api;
 mod config;
 mod db;
 mod listener;
@@ -49,6 +50,8 @@ async fn main() -> Result<()> {
     tracing::info!("✅ 配置加载成功");
     tracing::info!("🎯 目标钱包: {}", config.target_wallet);
     tracing::info!("💰 跟单金额: ${:.2}", config.copy_trade_amount);
+    tracing::info!("📊 最大滑点: {:.1}%", config.max_slippage * 100.0);
+    tracing::info!("⏰ 最小剩余时间: {}s", config.min_remaining_time);
 
     // 初始化数据库
     let db = Arc::new(Database::new(&config.db_path)?);
@@ -59,7 +62,7 @@ async fn main() -> Result<()> {
         let stats = db.get_stats()?;
         println!("\n📊 跟单统计");
         println!("──────────────────────────");
-        println!("总交易数: {}", stats.total_trades);
+        println!("监控到的交易数: {}", stats.total_trades);
         println!("已跟单: {}", stats.followed_trades);
         println!("已跳过: {}", stats.skipped_trades);
         return Ok(());
@@ -87,6 +90,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("✅ 监听器启动成功");
     tracing::info!("📡 等待目标钱包交易...\n");
+    tracing::info!("─────────────────────────────────────────────");
 
     // 监听模式
     if args.watch_only {
@@ -94,10 +98,11 @@ async fn main() -> Result<()> {
 
         while let Some(event) = event_receiver.recv().await {
             tracing::info!(
-                "👁️ [监控] TX: {} | Token: {} | 方向: {}",
-                event.tx_hash,
-                event.token_id,
-                event.token_side
+                "👁️ [监控] TX: {} | Token: {} | 方向: {} | 数量: {}",
+                &event.tx_hash[..20],
+                &event.token_id[..20],
+                event.token_side,
+                event.taker_amount
             );
         }
     } else {

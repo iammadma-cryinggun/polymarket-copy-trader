@@ -17,6 +17,9 @@ alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", features = 
     "sol-types",
 ] }
 
+# Polymarket SDK (使用本地路径)
+polymarket-client-sdk = { path = "../btc_doomsday_rust_final/rs-clob-client" }
+
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
 
@@ -47,6 +50,9 @@ dotenv = "0.15"
 
 # HTTP client (for CLOB API)
 reqwest = { version = "0.12", features = ["json"] }
+
+# UUID (for order IDs)
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 opt-level = 3

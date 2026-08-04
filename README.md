@@ -20,7 +20,7 @@
 │  过滤目标钱包: 0xf418...                                 │
 │       │                                                  │
 │       ▼                                                  │
-│  风控检查 → 滑点检查 → 执行跟单                          │
+│  三道风控 → 滑点检查 → 执行跟单                          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -34,58 +34,73 @@
 
 ## 🛠️ 快速开始
 
-### 1. 安装依赖
+### 1. 安装 Rust
 
 ```bash
-# 克隆项目
-git clone https://github.com/yourusername/polymarket-copy-trader.git
-cd polymarket-copy-trader
+# Windows: 下载并运行 rustup-init.exe
+# https://rustup.rs/
 
-# 复制配置文件
+# Linux/macOS
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### 2. 克隆项目
+
+```bash
+git clone https://github.com/iammadma-cryinggun/polymarket-copy-trader.git
+cd polymarket-copy-trader
+```
+
+### 3. 配置环境变量
+
+```bash
+# 复制配置模板
 cp .env.example .env
 
-# 编辑配置
+# 编辑配置（填入你的 API Key 和私钥）
 nano .env
 ```
 
-### 2. 配置环境变量
+**必填项**：
+
+| 变量 | 说明 | 获取方式 |
+|------|------|----------|
+| `POLYGON_WS_URL` | Alchemy Polygon WebSocket | [Alchemy Dashboard](https://dashboard.alchemy.com/) |
+| `PRIVATE_KEY` | MetaMask 私钥 | MetaMask → 账户详情 → 导出私钥 |
+| `TARGET_WALLET` | 要跟单的钱包地址 | Polymarket 用户主页 |
+
+### 4. 运行
 
 ```bash
-# Alchemy Polygon WebSocket URL
-POLYGON_WS_URL=wss://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+# 监控模式（只看不下单，推荐先用这个测试）
+cargo run --release -- --watch-only
 
-# 目标钱包地址
-TARGET_WALLET=0xf418d3a1a941292f9c8707d62a14980c5beb95a3
-
-# 私钥（用于签名交易）
-PRIVATE_KEY=your_private_key_here
-
-# 跟单金额（USDC）
-COPY_TRADE_AMOUNT=20
-
-# 最大滑点（15%）
-MAX_SLIPPAGE=0.15
-
-# 最小剩余时间（最后30秒不跟单）
-MIN_REMAINING_TIME=30
-```
-
-### 3. 运行
-
-```bash
-# 监控模式（只看不下单）
-cargo run -- --watch-only
-
-# 跟单模式（自动执行）
-cargo run
+# 跟单模式（自动执行，需要配置私钥）
+cargo run --release
 
 # 查看统计
-cargo run -- --stats
+cargo run --release -- --stats
 ```
 
-## 🛡️ 风控机制
+## 🛡️ 三道风控防线
 
-### 1. 最大滑点拦截
+### 1. 残余时间拦截
+
+```
+剩余时间: 25s < 30s ❌ 放弃跟单
+```
+
+**原因**：5分钟市场的最后30秒流动性差、滑点大
+
+### 2. 入场价过滤
+
+```
+入场价: 0.92 >= 0.90 ❌ 放弃跟单
+```
+
+**原因**：入场价 >= 0.90 是负EV区间（数据验证）
+
+### 3. 最大滑点拦截
 
 ```
 大户入场价: 0.60
@@ -93,32 +108,24 @@ cargo run -- --stats
 滑点: (0.75 - 0.60) / 0.60 = 25% > 15% ❌ 放弃跟单
 ```
 
-### 2. 残余时间拦截
-
-```
-剩余时间: 25s < 30s ❌ 放弃跟单
-```
-
-### 3. 固定金额跟单
-
-```
-跟单金额: $20 USDC（不按比例放大）
-```
+**原因**：防止高位接盘
 
 ## 📁 项目结构
 
 ```
 polymarket-copy-trader/
 ├── src/
-│   ├── main.rs          # 主入口
+│   ├── main.rs          # 主入口（CLI + 事件循环）
 │   ├── abi.rs           # Polymarket 合约 ABI
+│   ├── api.rs           # Polymarket CLOB API 客户端
 │   ├── config.rs        # 配置管理
 │   ├── db.rs            # 数据库记录
 │   ├── listener.rs      # Polygon WS 监听器
-│   └── trader.rs        # 跟单执行器
-├── Cargo.toml
-├── .env.example
-└── README.md
+│   └── trader.rs        # 跟单执行器（风控+下单）
+├── Cargo.toml           # Rust 依赖
+├── .env.example         # 环境变量模板
+├── .gitignore           # Git 忽略规则
+└── README.md            # 项目说明
 ```
 
 ## 🔧 核心合约
@@ -128,18 +135,29 @@ polymarket-copy-trader/
 | CTF Exchange | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | Polymarket 主交易所 |
 | NegRisk Exchange | `0xd91E40c3570878C357392B0C93bF2C93f5b18D54` | 新版交易所 |
 
+## 📊 性能指标
+
+- **监听延迟**: ~1.5 秒（Polygon 区块时间）
+- **下单延迟**: ~0.5 秒
+- **总延迟**: ~2 秒
+
 ## ⚠️ 风险提示
 
 1. **市场风险** - 跟单策略不保证盈利
 2. **延迟风险** - 即使 1.5 秒延迟也可能错过最佳入场
 3. **滑点风险** - 大额交易可能推高价格
 4. **隐私风险** - 链上交易是公开的
+5. **私钥安全** - **永远不要把 .env 文件提交到 Git**
 
-## 📊 性能指标
+## 🚀 路线图
 
-- **监听延迟**: ~1.5 秒（Polygon 区块时间）
-- **下单延迟**: ~0.5 秒
-- **总延迟**: ~2 秒
+- [x] Polygon WS 监听
+- [x] 三道风控防线
+- [x] Polymarket CLOB API 下单
+- [ ] 多地址同时监听
+- [ ] Telegram 通知
+- [ ] Web Dashboard
+- [ ] 胜率统计分析
 
 ## 📄 License
 
@@ -153,8 +171,20 @@ A: Polymarket WebSocket 只能订阅**自己账户**的交易，不能监听其�
 
 ### Q: 为什么选择 Alchemy 节点?
 
-A: Alchemy 提供稳定的 Polygon WebSocket 节点，延迟低、稳定性高。
+A: Alchemy 提供稳定的 Polygon WebSocket 节点，延迟低、稳定性高。免费套餐每月 300M 计算单位足够使用。
 
 ### Q: 跟单金额如何设置?
 
 A: 建议设置固定金额（如 $20），不要按比例放大，避免资金管理失控。
+
+### Q: 如何判断目标钱包是否值得跟单?
+
+A: 先运行 `--watch-only` 模式观察几天，查看胜率和交易频率，再决定是否跟单。
+
+### Q: Paper Trading 模式是什么?
+
+A: 如果不配置 `PRIVATE_KEY` 或配置为空，程序会自动进入 Paper Trading 模式，模拟交易不真实下单。
+
+---
+
+**⚠️ 重要提示**: 本项目仅供学习和研究目的，使用本项目进行交易的一切风险由用户自行承担。
