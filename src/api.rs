@@ -171,12 +171,19 @@ impl PolymarketClient {
             });
         }
 
-        // 真实交易需要私钥
-        let _private_key = self.private_key.as_ref().context("未配置私钥")?;
+        // 真实交易
+        let _pk = self.private_key.as_ref().context("未配置私钥")?;
+
+        tracing::info!(
+            "📝 [真实交易] Token: {} | {} | 价格: {:.3} | 数量: {:.2}",
+            &token_id[..20],
+            side,
+            price,
+            size
+        );
 
         // TODO: 实现真实下单逻辑
-        // 这里暂时返回 paper trading 结果
-        tracing::warn!("⚠️ 真实交易暂未实现，使用 Paper Trading 模式");
+        tracing::warn!("⚠️ 真实交易暂未实现，返回 mock 结果");
 
         Ok(TradeResult {
             order_id: format!("mock_{}", uuid::Uuid::new_v4()),

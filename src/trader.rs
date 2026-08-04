@@ -1,6 +1,4 @@
 //! 跟单执行器
-//!
-//! 执行跟单逻辑，包含三道风控检查
 
 use crate::api::{MarketInfo, OrderBook, PolymarketClient, TradeResult};
 use crate::config::Config;
@@ -13,19 +11,17 @@ use std::sync::Arc;
 /// 跟单执行器
 pub struct CopyTrader {
     config: Config,
-    db: Arc<Database>,
+    db: Database,
     api_client: Arc<PolymarketClient>,
 }
 
-/// 风控检查结果
 struct CheckResult {
     passed: bool,
     reason: String,
 }
 
 impl CopyTrader {
-    /// 创建跟单执行器
-    pub fn new(config: Config, db: Arc<Database>) -> Self {
+    pub fn new(config: Config, db: Database) -> Self {
         let paper_trading = config.private_key.is_empty() || config.private_key == "your_private_key_here";
 
         let api_client = Arc::new(PolymarketClient::new(
@@ -46,7 +42,6 @@ impl CopyTrader {
         }
     }
 
-    /// 处理交易事件
     pub async fn handle_trade_event(&self, event: TradeEvent) -> Result<()> {
         let start_time = std::time::Instant::now();
 
@@ -56,7 +51,6 @@ impl CopyTrader {
             start_time.elapsed().as_millis()
         );
 
-        // 查询市场信息
         let market_info = match self.api_client.get_market_by_token(&event.token_id).await {
             Ok(m) => m,
             Err(e) => {
@@ -71,7 +65,6 @@ impl CopyTrader {
             market_info.remaining_time
         );
 
-        // 风控检查
         let check_result = self.run_risk_checks(&event, &market_info)?;
 
         if !check_result.passed {
@@ -83,7 +76,6 @@ impl CopyTrader {
             return Ok(());
         }
 
-        // 查询当前盘口
         let orderbook = match self.api_client.fetch_best_prices(&event.token_id).await {
             Ok(ob) => ob,
             Err(e) => {
@@ -99,7 +91,6 @@ impl CopyTrader {
             orderbook.spread
         );
 
-        // 滑点检查
         let slippage = self.calculate_slippage(&event, &orderbook)?;
 
         if slippage > self.config.max_slippage {
@@ -111,7 +102,6 @@ impl CopyTrader {
             return Ok(());
         }
 
-        // 执行跟单
         let order_price = orderbook.best_ask + 0.01;
 
         tracing::info!(
@@ -142,7 +132,6 @@ impl CopyTrader {
             result.filled_size
         );
 
-        // 记录到数据库
         let copy_trade = CopyTrade {
             id: None,
             tx_hash: event.tx_hash.clone(),
@@ -165,9 +154,7 @@ impl CopyTrader {
         Ok(())
     }
 
-    /// 风控检查
     fn run_risk_checks(&self, event: &TradeEvent, market_info: &MarketInfo) -> Result<CheckResult> {
-        // 检查1：残余时间
         if market_info.remaining_time < self.config.min_remaining_time as i64 {
             return Ok(CheckResult {
                 passed: false,
@@ -178,7 +165,6 @@ impl CopyTrader {
             });
         }
 
-        // 检查2：价格有效性
         if event.taker_amount == 0 || event.maker_amount == 0 {
             return Ok(CheckResult {
                 passed: false,
@@ -186,7 +172,6 @@ impl CopyTrader {
             });
         }
 
-        // 检查3：金额限制
         if self.config.copy_trade_amount <= 0.0 {
             return Ok(CheckResult {
                 passed: false,
@@ -194,7 +179,6 @@ impl CopyTrader {
             });
         }
 
-        // 检查4：入场价过滤
         let target_price = event.taker_amount as f64 / event.maker_amount as f64;
         if target_price >= 0.90 {
             return Ok(CheckResult {
@@ -209,7 +193,6 @@ impl CopyTrader {
         })
     }
 
-    /// 计算滑点
     fn calculate_slippage(&self, event: &TradeEvent, orderbook: &OrderBook) -> Result<f64> {
         let target_price = if event.maker_amount > 0 {
             event.taker_amount as f64 / event.maker_amount as f64

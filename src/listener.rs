@@ -10,7 +10,6 @@ use alloy::sol_types::SolEvent;
 use anyhow::Result;
 use chrono::Utc;
 use futures::StreamExt;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// 监听到的交易事件
