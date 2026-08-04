@@ -15,6 +15,8 @@ alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v0.4.0", features = 
     "signer-local",
     "rpc-types-eth",
     "sol-types",
+    "contract",        # 新增：合约调用
+    "network",         # 新增：网络支持
 ] }
 
 # Polymarket SDK (官方仓库)

@@ -70,8 +70,7 @@ pub mod addresses {
 
 /// OrderFilled 事件签名（用于过滤日志）
 pub mod event_sigs {
-    use alloy::primitives::B256;
-    use alloy::sol_utils::keccak256;
+    use alloy::primitives::{B256, keccak256};
 
     /// OrderFilled 事件签名
     /// = keccak256("OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256)")
