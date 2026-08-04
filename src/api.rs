@@ -229,7 +229,7 @@ impl PolymarketClient {
         let token_id_u256 = U256::from_str(token_id)?;
 
         // 转换金额 (size_usdc 是 USDC 金额)
-        let amount = Amount::usdc(Decimal::from(size_usdc as i64))?;
+        let amount = Amount::usdc(Decimal::from_str_exact(&size_usdc.to_string())?)?;
 
         // 确定买卖方向
         let trade_side = if side.eq_ignore_ascii_case("BUY") {
