@@ -290,10 +290,8 @@ impl PolymarketClient {
 
         let balance_info = client.balance_allowance(BalanceAllowanceRequest::default()).await?;
 
-        // 解析 USDC 余额
-        let balance = balance_info.balance
-            .map(|b| b.parse::<f64>().unwrap_or(0.0))
-            .unwrap_or(0.0);
+        // balance 已经是 Decimal，直接转换为 f64
+        let balance = balance_info.balance.to_string().parse::<f64>().unwrap_or(0.0);
 
         Ok(balance)
     }

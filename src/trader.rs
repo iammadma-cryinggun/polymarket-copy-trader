@@ -1,10 +1,10 @@
 //! 跟单执行器
 
-use crate::api::{MarketInfo, OrderBook, PolymarketClient, TradeResult};
+use crate::api::{MarketInfo, OrderBook, PolymarketClient};
 use crate::config::Config;
 use crate::db::{CopyTrade, Database};
 use crate::listener::TradeEvent;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use std::sync::Arc;
 
