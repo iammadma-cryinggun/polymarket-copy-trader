@@ -37,10 +37,26 @@ impl Config {
 
         // 支持 ALCHEMY_API_KEY 或完整的 POLYGON_WS_URL
         let polygon_ws_url = if let Ok(api_key) = env::var("ALCHEMY_API_KEY") {
-            format!("wss://polygon-mainnet.g.alchemy.com/v2/{}", api_key)
+            // 如果是完整 URL，自动转换 scheme
+            if api_key.starts_with("https://") {
+                api_key.replace("https://", "wss://")
+            } else if api_key.starts_with("http://") {
+                api_key.replace("http://", "ws://")
+            } else {
+                // 纯 API Key，构建 URL
+                format!("wss://polygon-mainnet.g.alchemy.com/v2/{}", api_key)
+            }
         } else {
-            env::var("POLYGON_WS_URL")
-                .context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?
+            let url = env::var("POLYGON_WS_URL")
+                .context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?;
+            // 同样转换 POLYGON_WS_URL
+            if url.starts_with("https://") {
+                url.replace("https://", "wss://")
+            } else if url.starts_with("http://") {
+                url.replace("http://", "ws://")
+            } else {
+                url
+            }
         };
 
         let config = Self {
