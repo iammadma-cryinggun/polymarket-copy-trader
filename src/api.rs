@@ -5,6 +5,16 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+
+use alloy::signers::local::LocalSigner;
+use polymarket_client_sdk::clob::types::request::{
+    BalanceAllowanceRequest, OrdersRequest,
+};
+use polymarket_client_sdk::clob::types::{Amount, Side};
+use polymarket_client_sdk::clob::{Client, Config};
+use polymarket_client_sdk::types::{Decimal, U256};
+use polymarket_client_sdk::POLYGON;
 
 /// Polymarket 客户端
 pub struct PolymarketClient {
@@ -172,25 +182,121 @@ impl PolymarketClient {
         }
 
         // 真实交易
-        let _pk = self.private_key.as_ref().context("未配置私钥")?;
+        let private_key = self.private_key.as_ref().context("未配置私钥")?;
 
         tracing::info!(
             "📝 [真实交易] Token: {} | {} | 价格: {:.3} | 数量: {:.2}",
-            &token_id[..20],
+            &token_id[..std::cmp::min(20, token_id.len())],
             side,
             price,
             size
         );
 
-        // TODO: 实现真实下单逻辑
-        tracing::warn!("⚠️ 真实交易暂未实现，返回 mock 结果");
+        match self.execute_real_trade(token_id, side, price, size, private_key).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                tracing::error!("❌ 下单失败: {}", e);
+                Ok(TradeResult {
+                    order_id: String::new(),
+                    success: false,
+                    filled_size: 0.0,
+                    status: Some("failed".to_string()),
+                    message: e.to_string(),
+                })
+            }
+        }
+    }
+
+    /// 执行真实交易
+    async fn execute_real_trade(
+        &self,
+        token_id: &str,
+        side: &str,
+        price: f64,
+        size_usdc: f64,
+        private_key: &str,
+    ) -> Result<TradeResult> {
+        // 创建签名器
+        let signer = LocalSigner::from_str(private_key)?
+            .with_chain_id(Some(POLYGON));
+
+        // 创建 CLOB 客户端
+        let config = Config::builder().use_server_time(true).build();
+        let client = Client::new(&self.clob_url, config)?
+            .authentication_builder(&signer)
+            .authenticate()
+            .await?;
+
+        // 解析 token_id
+        let token_id_u256 = U256::from_str(token_id)?;
+
+        // 转换金额
+        let amount = Amount::usdc(Decimal::new(size_usdc as i64, 0))?;
+
+        // 确定买卖方向
+        let trade_side = if side.eq_ignore_ascii_case("BUY") {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
+
+        tracing::info!(
+            "🎯 下单参数: token_id={}, side={:?}, amount={:.2} USDC",
+            &token_id[..20],
+            trade_side,
+            size_usdc
+        );
+
+        // 创建市价单
+        let market_order = client
+            .market_order()
+            .token_id(token_id_u256)
+            .amount(amount)
+            .side(trade_side)
+            .build()
+            .await?;
+
+        // 签名订单
+        let signed_order = client.sign(&signer, market_order).await?;
+
+        // 提交订单
+        let result = client.post_order(signed_order).await?;
+
+        tracing::info!(
+            "✅ 下单成功! order_id={}, success={}",
+            result.order_id,
+            result.success
+        );
 
         Ok(TradeResult {
-            order_id: format!("mock_{}", uuid::Uuid::new_v4()),
-            success: true,
-            filled_size: size / price,
-            status: Some("mock".to_string()),
-            message: "Mock trade (real trading not implemented)".to_string(),
+            order_id: result.order_id,
+            success: result.success,
+            filled_size: size_usdc / price, // 估算成交股数
+            status: Some("submitted".to_string()),
+            message: "Order submitted successfully".to_string(),
         })
+    }
+
+    /// 检查余额
+    pub async fn check_balance(&self) -> Result<f64> {
+        let private_key = self.private_key.as_ref().context("未配置私钥")?;
+
+        let signer = LocalSigner::from_str(private_key)?
+            .with_chain_id(Some(POLYGON));
+
+        let config = Config::builder().use_server_time(true).build();
+        let client = Client::new(&self.clob_url, config)?
+            .authentication_builder(&signer)
+            .authenticate()
+            .await?;
+
+        let balance_info = client.balance_allowance(BalanceAllowanceRequest::default()).await?;
+
+        // 解析 USDC 余额
+        let balance = balance_info.balance
+            .map(|b| b.parse::<f64>().unwrap_or(0.0))
+            .unwrap_or(0.0);
+
+        Ok(balance)
     }
 }
