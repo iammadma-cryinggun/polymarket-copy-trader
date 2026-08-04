@@ -3,14 +3,12 @@
 //! 封装 CLOB API 调用
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use alloy::signers::local::LocalSigner;
-use polymarket_client_sdk::clob::types::request::{
-    BalanceAllowanceRequest, OrdersRequest,
-};
+use alloy::signers::{Signer, local::LocalSigner};
+use polymarket_client_sdk::clob::types::request::BalanceAllowanceRequest;
 use polymarket_client_sdk::clob::types::{Amount, Side};
 use polymarket_client_sdk::clob::{Client, Config};
 use polymarket_client_sdk::types::{Decimal, U256};
@@ -18,7 +16,7 @@ use polymarket_client_sdk::POLYGON;
 
 /// Polymarket 客户端
 pub struct PolymarketClient {
-    http_client: Client,
+    http_client: HttpClient,
     clob_url: String,
     gamma_url: String,
     private_key: Option<String>,
@@ -60,7 +58,7 @@ impl PolymarketClient {
     /// 创建客户端
     pub fn new(private_key: Option<String>, paper_trading: bool) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client: HttpClient::new(),
             clob_url: "https://clob.polymarket.com".to_string(),
             gamma_url: "https://gamma-api.polymarket.com".to_string(),
             private_key,
@@ -230,8 +228,8 @@ impl PolymarketClient {
         // 解析 token_id
         let token_id_u256 = U256::from_str(token_id)?;
 
-        // 转换金额
-        let amount = Amount::usdc(Decimal::new(size_usdc as i64, 0))?;
+        // 转换金额 (size_usdc 是 USDC 金额)
+        let amount = Amount::usdc(Decimal::from(size_usdc as i64))?;
 
         // 确定买卖方向
         let trade_side = if side.eq_ignore_ascii_case("BUY") {
