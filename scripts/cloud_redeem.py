@@ -19,7 +19,8 @@ from typing import List, Dict
 load_dotenv()
 
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
-RPC_URL = os.getenv("RPC_URL", os.getenv("POLYMARKET_RPC", "https://polygon-mainnet.g.alchemy.com/v2/lvMbAszdqd8vyswgr0hMu"))
+# 默认使用公共 RPC，避免 Alchemy 429 限流
+RPC_URL = os.getenv("RPC_URL", os.getenv("POLYMARKET_RPC", "https://polygon-bor-rpc.publicnode.com"))
 PROXY_URL = os.getenv("HTTP_PROXY", os.getenv("HTTPS_PROXY", ""))
 CTF_CONTRACT = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
