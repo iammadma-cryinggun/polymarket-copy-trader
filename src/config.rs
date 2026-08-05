@@ -190,6 +190,15 @@ impl Config {
             anyhow::bail!("COPY_TRADE_AMOUNT 应大于 0");
         }
 
+        // Polymarket CLOB 单笔订单下限为 5 USDC；低于此值会被拒单
+        if self.copy_trade_amount < 5.0 {
+            tracing::warn!(
+                "⚠️ COPY_TRADE_AMOUNT={:.2} 低于 Polymarket CLOB 最小下单金额 $5，\
+                 实盘下单会被拒单（监测/纸面模式无影响）",
+                self.copy_trade_amount
+            );
+        }
+
         // 验证熔断频次
         if self.max_orders_per_minute == 0 {
             anyhow::bail!("MAX_ORDERS_PER_MINUTE 应大于 0");
