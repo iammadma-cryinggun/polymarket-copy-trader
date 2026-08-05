@@ -4,7 +4,7 @@ use crate::api::{MarketInfo, OrderBook, PolymarketClient};
 use crate::config::Config;
 use crate::db::{CopyTrade, Database};
 use crate::listener::TradeEvent;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -28,9 +28,19 @@ impl CopyTrader {
     pub fn new(config: Config, db: Database) -> Self {
         let paper_trading = config.private_key.is_empty() || config.private_key == "your_private_key_here";
 
+        // V2 签名类型：0=EOA 1=PolyProxy 2=GnosisSafe 3=Poly1271
+        let signature_type = match config.signature_type {
+            0 => polymarket_client_sdk_v2::clob::types::SignatureType::Eoa,
+            1 => polymarket_client_sdk_v2::clob::types::SignatureType::Proxy,
+            2 => polymarket_client_sdk_v2::clob::types::SignatureType::GnosisSafe,
+            _ => polymarket_client_sdk_v2::clob::types::SignatureType::Poly1271,
+        };
+
         let api_client = Arc::new(PolymarketClient::new(
             if paper_trading { None } else { Some(config.private_key.clone()) },
             paper_trading,
+            signature_type,
+            config.funder.clone(),
         ));
 
         if paper_trading {
@@ -38,6 +48,8 @@ impl CopyTrader {
         } else {
             tracing::info!("🤖 实盘模式");
         }
+
+        tracing::info!("🔑 签名类型: {:?} | funder: {}", signature_type, config.funder.as_deref().unwrap_or("-"));
 
         Self {
             config,
@@ -140,11 +152,17 @@ impl CopyTrader {
             }
         };
 
+        // 订单提交失败（如被 CLOB 拒绝）时不记录为已成交，也不进入完成日志
+        if !result.success {
+            tracing::error!("❌ 订单提交失败: {}", result.message);
+            return Err(anyhow!("订单提交失败: {}", result.message));
+        }
+
         let total_time = start_time.elapsed();
         tracing::info!(
             "✅ [跟单完成] 总耗时: {}ms | TX: {} | 成交: {:.2} shares",
             total_time.as_millis(),
-            &result.order_id[..20],
+            &result.order_id[..std::cmp::min(20, result.order_id.len())],
             result.filled_size
         );
 

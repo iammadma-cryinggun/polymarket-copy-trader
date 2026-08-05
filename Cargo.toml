@@ -18,8 +18,8 @@ alloy = { version = "1", default-features = false, features = [
     "sol-types",
 ] }
 
-# Polymarket SDK - 启用 clob feature
-polymarket-client-sdk = { git = "https://github.com/polymarket/rs-clob-client", tag = "v0.4.4", features = ["clob"] }
+# Polymarket SDK - CLOB V2 (2026-04-28 起 V1 SDK 已无法下单，"invalid order version")
+polymarket_client_sdk_v2 = { version = "0.7", features = ["clob"] }
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }

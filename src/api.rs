@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use alloy::signers::{Signer, local::LocalSigner};
-use polymarket_client_sdk::clob::types::request::BalanceAllowanceRequest;
-use polymarket_client_sdk::clob::types::{Amount, Side};
-use polymarket_client_sdk::clob::{Client, Config};
-use polymarket_client_sdk::types::{Decimal, U256};
-use polymarket_client_sdk::POLYGON;
+use polymarket_client_sdk_v2::clob::types::request::BalanceAllowanceRequest;
+use polymarket_client_sdk_v2::clob::types::{Amount, Side, SignatureType};
+use polymarket_client_sdk_v2::clob::{Client, Config};
+use polymarket_client_sdk_v2::types::{Decimal, U256};
+use polymarket_client_sdk_v2::POLYGON;
 
 /// Polymarket 客户端
 pub struct PolymarketClient {
@@ -21,6 +21,10 @@ pub struct PolymarketClient {
     gamma_url: String,
     private_key: Option<String>,
     paper_trading: bool,
+    /// V2 签名类型（0=EOA, 1=PolyProxy, 2=GnosisSafe, 3=Poly1271）
+    signature_type: SignatureType,
+    /// 资金地址（代理/Safe/存款钱包时设置；EOA 留空）
+    funder: Option<String>,
 }
 
 /// 市场信息
@@ -56,13 +60,20 @@ pub struct TradeResult {
 
 impl PolymarketClient {
     /// 创建客户端
-    pub fn new(private_key: Option<String>, paper_trading: bool) -> Self {
+    pub fn new(
+        private_key: Option<String>,
+        paper_trading: bool,
+        signature_type: SignatureType,
+        funder: Option<String>,
+    ) -> Self {
         Self {
             http_client: HttpClient::new(),
             clob_url: "https://clob.polymarket.com".to_string(),
             gamma_url: "https://gamma-api.polymarket.com".to_string(),
             private_key,
             paper_trading,
+            signature_type,
+            funder,
         }
     }
 
@@ -275,12 +286,18 @@ impl PolymarketClient {
         let signer = LocalSigner::from_str(private_key)?
             .with_chain_id(Some(POLYGON));
 
-        // 创建 CLOB 客户端
+        // 创建 CLOB 客户端（CLOB V2；V1 SDK 已无法下单）
         let config = Config::builder().use_server_time(true).build();
-        let client = Client::new(&self.clob_url, config)?
+        let mut auth_builder = Client::new(&self.clob_url, config)?
             .authentication_builder(&signer)
-            .authenticate()
-            .await?;
+            .signature_type(self.signature_type);
+
+        if let Some(funder) = &self.funder {
+            let funder = funder.parse::<alloy::primitives::Address>()?;
+            auth_builder = auth_builder.funder(funder);
+        }
+
+        let client = auth_builder.authenticate().await?;
 
         // 解析 token_id
         let token_id_u256 = U256::from_str(token_id)?;
@@ -340,10 +357,16 @@ impl PolymarketClient {
             .with_chain_id(Some(POLYGON));
 
         let config = Config::builder().use_server_time(true).build();
-        let client = Client::new(&self.clob_url, config)?
+        let mut auth_builder = Client::new(&self.clob_url, config)?
             .authentication_builder(&signer)
-            .authenticate()
-            .await?;
+            .signature_type(self.signature_type);
+
+        if let Some(funder) = &self.funder {
+            let funder = funder.parse::<alloy::primitives::Address>()?;
+            auth_builder = auth_builder.funder(funder);
+        }
+
+        let client = auth_builder.authenticate().await?;
 
         let balance_info = client.balance_allowance(BalanceAllowanceRequest::default()).await?;
 

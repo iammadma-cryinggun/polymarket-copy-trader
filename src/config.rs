@@ -24,6 +24,12 @@ pub struct Config {
     /// 私钥（用于签名交易）
     pub private_key: String,
 
+    /// CLOB V2 签名类型：0=EOA（默认）, 1=PolyProxy(Magic/邮箱), 2=GnosisSafe, 3=Poly1271(存款钱包)
+    pub signature_type: u8,
+
+    /// 资金地址（代理/Safe/存款钱包时需设置；EOA 留空）
+    pub funder: Option<String>,
+
     /// 跟单金额（USDC）
     pub copy_trade_amount: f64,
 
@@ -121,6 +127,13 @@ impl Config {
 
             private_key: env::var("PRIVATE_KEY").context("PRIVATE_KEY 环境变量未设置")?,
 
+            signature_type: env::var("SIGNATURE_TYPE")
+                .unwrap_or_else(|_| "0".to_string())
+                .parse()
+                .context("SIGNATURE_TYPE 解析失败")?,
+
+            funder: env::var("FUNDER_ADDRESS").ok().filter(|s| !s.is_empty()),
+
             copy_trade_amount: env::var("COPY_TRADE_AMOUNT")
                 .unwrap_or_else(|_| "10".to_string())
                 .parse()
@@ -215,6 +228,11 @@ impl Config {
         // 验证熔断额度
         if self.daily_spend_cap <= 0.0 {
             anyhow::bail!("DAILY_SPEND_CAP 应大于 0");
+        }
+
+        // 验证签名类型
+        if self.signature_type > 3 {
+            anyhow::bail!("SIGNATURE_TYPE 应为 0(EOA)/1(PolyProxy)/2(GnosisSafe)/3(Poly1271)");
         }
 
         tracing::info!("✅ 配置验证通过");
