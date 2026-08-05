@@ -69,7 +69,7 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        // 支持 ALCHEMY_API_KEY 或完整的 POLYGON_WS_URL
+        // 支持 ALCHEMY_API_KEY 或完整的 POLYGON_WS_URL，如果都没设置则使用公共 RPC
         let polygon_ws_url = if let Ok(api_key) = env::var("ALCHEMY_API_KEY") {
             // 如果是完整 URL，自动转换 scheme
             if api_key.starts_with("https://") {
@@ -80,10 +80,8 @@ impl Config {
                 // 纯 API Key，构建 URL
                 format!("wss://polygon-mainnet.g.alchemy.com/v2/{}", api_key)
             }
-        } else {
-            let url =
-                env::var("POLYGON_WS_URL").context("需要设置 ALCHEMY_API_KEY 或 POLYGON_WS_URL")?;
-            // 同样转换 POLYGON_WS_URL
+        } else if let Ok(url) = env::var("POLYGON_WS_URL") {
+            // 转换 POLYGON_WS_URL 的 scheme
             if url.starts_with("https://") {
                 url.replace("https://", "wss://")
             } else if url.starts_with("http://") {
@@ -91,6 +89,10 @@ impl Config {
             } else {
                 url
             }
+        } else {
+            // 使用公共 RPC（无需 Alchemy API key）
+            tracing::info!("🌐 未设置 ALCHEMY_API_KEY/POLYGON_WS_URL，使用公共 RPC");
+            "wss://polygon-bor-rpc.publicnode.com".to_string()
         };
 
         let config = Self {
