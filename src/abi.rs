@@ -11,7 +11,7 @@ sol! {
     // 方向推断：makerAssetId == 0 表示 maker 在买入（BUY），否则为卖出（SELL）
     contract CTFExchangeV1 {
         event OrderFilled(
-            bytes32 orderHash,
+            bytes32 indexed orderHash,
             address indexed maker,
             address indexed taker,
             uint256 makerAssetId,
@@ -26,7 +26,7 @@ sol! {
     // V2 事件为 10 个参数：单 tokenId + 显式 uint8 side（0=BUY, 1=SELL）+ builder + metadata
     contract CTFExchangeV2 {
         event OrderFilled(
-            bytes32 orderHash,
+            bytes32 indexed orderHash,
             address indexed maker,
             address indexed taker,
             uint8 side,
@@ -97,5 +97,70 @@ mod tests {
         let expected: B256 = V2_TOPIC0.parse().unwrap();
         assert_eq!(CTFExchangeV2::OrderFilled::SIGNATURE_HASH, expected);
         assert_eq!(order_filled_v2(), expected);
+    }
+
+    /// 用一条真实抓取的链上 V2 OrderFilled 日志验证解码。
+    /// 该日志 topics 为 [sig, orderHash(indexed), maker(indexed), taker(indexed)]，
+    /// 若 orderHash 未标 indexed 会导致 decode_raw_log 失败（topic 数量不符），从而静默漏检。
+    #[test]
+    fn v2_decode_works_for_real_onchain_log() {
+        use alloy::primitives::{Bytes, U256};
+        use alloy::sol_types::SolEvent;
+
+        fn hex_to_bytes(s: &str) -> Vec<u8> {
+            let s = s.strip_prefix("0x").unwrap_or(s);
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let topics: Vec<B256> = vec![
+            V2_TOPIC0.parse().unwrap(),
+            "0x066df9f5d6c3563b61e95d96eb4c659cd4d0f4b338853795897d0024d848ce99"
+                .parse()
+                .unwrap(),
+            "0x000000000000000000000000f418d3a1a941292f9c8707d62a14980c5beb95a3"
+                .parse()
+                .unwrap(),
+            "0x000000000000000000000000e111180000d2663c0091e4f400237545b87b996b"
+                .parse()
+                .unwrap(),
+        ];
+        let data = Bytes::from(hex_to_bytes(
+            "0000000000000000000000000000000000000000000000000000000000000000\
+             77e3116e59406c3c215b3e416501bc269dd01c5a68fd0747547ce931a648ea03\
+             00000000000000000000000000000000000000000000000000000000023c3460\
+             0000000000000000000000000000000000000000000000000000000002faf080\
+             00000000000000000000000000000000000000000000000000000000000a037a\
+             0000000000000000000000000000000000000000000000000000000000000000\
+             0000000000000000000000000000000000000000000000000000000000000000",
+        ));
+
+        let e = CTFExchangeV2::OrderFilled::decode_raw_log(&topics, &data)
+            .expect("V2 OrderFilled 应能解码（orderHash 为 indexed）");
+        assert_eq!(
+            e.maker,
+            "0xf418d3a1a941292f9c8707d62a14980c5beb95a3"
+                .parse::<alloy::primitives::Address>()
+                .unwrap()
+        );
+        assert_eq!(
+            e.taker,
+            "0xe111180000d2663c0091e4f400237545b87b996b"
+                .parse::<alloy::primitives::Address>()
+                .unwrap()
+        );
+        assert_eq!(e.side, 0u8);
+        assert_eq!(
+            e.tokenId,
+            U256::from_str_radix(
+                "77e3116e59406c3c215b3e416501bc269dd01c5a68fd0747547ce931a648ea03",
+                16
+            )
+            .unwrap()
+        );
+        assert_eq!(e.makerAmountFilled.to::<u64>(), 37_500_000);
+        assert_eq!(e.takerAmountFilled.to::<u64>(), 50_000_000);
     }
 }
