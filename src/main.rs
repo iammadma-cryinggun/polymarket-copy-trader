@@ -15,6 +15,9 @@ use crate::redeem::{RedeemConfig, Redeemer};
 use crate::trader::CopyTrader;
 use anyhow::Result;
 use clap::Parser;
+use fs2::FileExt;
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -26,6 +29,37 @@ struct Args {
 
     #[arg(short, long)]
     stats: bool,
+}
+
+/// 单例锁：防止多个实例同时运行。
+/// 多个实例共用同一 RPC Key 会占满并发连接数，是 429 限流的常见根因。
+/// 返回的 File 必须保持存活直到进程结束（进程退出/崩溃时系统自动释放锁）。
+fn acquire_single_instance_lock() -> Option<File> {
+    let path =
+        std::env::var("SINGLE_INSTANCE_LOCK").unwrap_or_else(|_| ".copy-trader.lock".to_string());
+
+    let file = match File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!("⚠️ 创建单例锁文件失败（{}: {}），跳过单例检查", path, e);
+            return None;
+        }
+    };
+
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            let _ = writeln!(&file, "pid={}", std::process::id());
+            Some(file)
+        }
+        Err(_) => {
+            tracing::error!(
+                "❌ 检测到另一个实例正在运行（锁文件 {} 被占用）！\n\
+                 多个实例同时连接会触发 RPC 429 限流。请先停止旧进程（如 Zeabur 重复部署）再启动。",
+                path
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 #[tokio::main]
@@ -40,6 +74,9 @@ async fn main() -> Result<()> {
     tracing::info!("🚀 Polymarket Copy Trader 启动中...");
 
     let args = Args::parse();
+
+    // 单例锁（保持存活直到进程结束）
+    let _instance_lock = acquire_single_instance_lock();
 
     let config = Config::from_env()?;
     tracing::info!("✅ 配置加载成功");

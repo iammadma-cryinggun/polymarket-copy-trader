@@ -46,6 +46,9 @@ async-trait = "0.1"
 anyhow = "1"
 thiserror = "1"
 
+# File locking (single-instance guard)
+fs2 = "0.4"
+
 # Config
 dotenv = "0.15"
 

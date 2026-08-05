@@ -176,7 +176,7 @@ MIT
 ### Q: 日志一直提示 `HTTP error: 429 Too Many Requests`？
 
 A: 这是 RPC 服务商限流，常见于 Alchemy 免费版。
-1. **多个实例同时在跑**（旧进程未关 / Zeabur 也在部署）会占满并发 WS 连接，务必只保留一个实例。
+1. **多个实例同时在跑**（旧进程未关 / Zeabur 也在部署）会占满并发 WS 连接。程序已内置**单例锁**：检测到锁文件 `.copy-trader.lock` 被占用时会拒绝启动并提示（锁路径可用 `SINGLE_INSTANCE_LOCK` 覆盖）。
 2. 程序已内置退避重连 + 备用 RPC 自动轮换（`POLYGON_WS_FALLBACK`），限流恢复后会自动切回。
 3. 若持续限流，可手动把 `POLYGON_WS_URL` 换成一个公共 WS 端点（如 `wss://polygon-bor-rpc.publicnode.com`）。
 
