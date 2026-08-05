@@ -104,7 +104,7 @@ def print_collateral_balances(prefix="BALANCE"):
 
 def send_tx(txn, label):
     signed = w3.eth.account.sign_transaction(txn, PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
     print(f"[{label}] 交易已发送: {tx_hash.hex()}")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
     if receipt["status"] != 1:
@@ -272,7 +272,7 @@ def redeem_position(position):
 
         # 签名并发送
         signed = w3.eth.account.sign_transaction(txn, PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
 
         print(f"  交易已发送: {tx_hash.hex()[:40]}...")
 
