@@ -40,8 +40,7 @@ else:
 
 # 初始化Web3
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-from web3.middleware import ExtraDataToPOAMiddleware
-w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+# 注意: web3.py 6.x+ 不再需要 ExtraDataToPOAMiddleware
 
 account = w3.eth.account.from_key(PRIVATE_KEY)
 WALLET = account.address
