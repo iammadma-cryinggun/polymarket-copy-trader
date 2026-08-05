@@ -64,12 +64,13 @@ fn acquire_single_instance_lock() -> Option<File> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("polymarket_copy_trader=debug".parse()?)
-        )
-        .init();
+    // 默认 info（避免每个市场成交都刷屏）；需要观察全量 OrderFilled 时设 RUST_LOG=debug
+    let filter = if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::EnvFilter::from_default_env()
+    } else {
+        tracing_subscriber::EnvFilter::new("polymarket_copy_trader=info")
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     tracing::info!("🚀 Polymarket Copy Trader 启动中...");
 
