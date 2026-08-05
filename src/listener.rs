@@ -161,9 +161,14 @@ impl Listener {
             let log = res.unwrap().unwrap();
             let tx_hash = log.transaction_hash.unwrap_or_default();
 
-            tracing::trace!(
-                "📥 收到链上 OrderFilled 事件，TxHash: {:?}",
-                log.transaction_hash
+            // 无条件打印收到的每条 OrderFilled（debug 级别，用于二分定位）
+            // 用 RUST_LOG=polymarket_copy_trader=debug 观察
+            let (ev_maker, ev_taker) = self.extract_parties(&log);
+            let hit = target_wallets.contains(&ev_maker)
+                || target_wallets.contains(&ev_taker);
+            tracing::debug!(
+                "📥 收到链上 OrderFilled | Tx: {:?} | maker: {:?} | taker: {:?} | 命中目标: {}",
+                log.transaction_hash, ev_maker, ev_taker, hit
             );
 
             if pending_tx == Some(tx_hash) {
