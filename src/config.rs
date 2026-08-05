@@ -11,6 +11,9 @@ pub struct Config {
     /// 备用 WebSocket URL 列表（主 RPC 限流/不可用时自动切换）
     pub polygon_ws_fallback_urls: Vec<String>,
 
+    /// eth_getLogs 轮询间隔（毫秒）。轮询代替了 WS 订阅，重连/429 时也不丢事件
+    pub log_poll_interval: u64,
+
     /// 目标钱包地址（要跟单的地址，兼容 EOA 与 Gnosis Safe Proxy）
     /// 支持逗号分隔的多个地址
     pub target_wallet: String,
@@ -102,6 +105,11 @@ impl Config {
                         "wss://polygon.drpc.org".to_string(),
                     ]
                 }),
+
+            log_poll_interval: env::var("LOG_POLL_INTERVAL")
+                .unwrap_or_else(|_| "4000".to_string())
+                .parse()
+                .context("LOG_POLL_INTERVAL 解析失败")?,
 
             target_wallet: env::var("TARGET_WALLET").context("TARGET_WALLET 环境变量未设置")?,
             target_wallets: env::var("TARGET_WALLETS")

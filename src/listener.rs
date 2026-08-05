@@ -4,18 +4,26 @@ use crate::abi::{addresses, event_sigs, CTFExchangeV1, CTFExchangeV2};
 use crate::config::Config;
 use crate::db::{Database, TargetTrade};
 use alloy::primitives::{Address, B256, U256};
-use alloy::providers::{Provider, ProviderBuilder, WsConnect};
-use alloy::rpc::types::{Filter, Log};
+use alloy::providers::{Provider, ProviderBuilder};
+use alloy::rpc::types::{BlockNumberOrTag, Filter, Log};
 use alloy::sol_types::SolEvent;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
-use futures::StreamExt;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::timeout;
+use tokio::time::sleep;
 
-/// 没有数据推送时判定为连接假死的超时（秒）
-const STALL_TIMEOUT_SECS: u64 = 120;
+/// 将 wss:// 或 ws:// 端点转换为等价的 https:// 用于 eth_getLogs HTTP 轮询
+fn ws_to_http(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("wss://") {
+        format!("https://{}", rest)
+    } else if let Some(rest) = url.strip_prefix("ws://") {
+        format!("http://{}", rest)
+    } else {
+        url.to_string()
+    }
+}
 
 /// 监听到的交易事件
 #[derive(Debug, Clone)]
@@ -54,135 +62,111 @@ impl Listener {
             .map(|w| w.parse::<Address>().context("目标钱包地址解析失败"))
             .collect::<Result<_>>()?;
 
-        // 主 WS + 备用 WS（主 RPC 限流/不可用时自动轮换）
-        let mut ws_urls: Vec<String> = vec![self.config.polygon_ws_url.clone()];
-        ws_urls.extend(self.config.polygon_ws_fallback_urls.clone());
+        // 主 RPC + 备用 RPC（限流/不可用时自动轮换），均转为 HTTP 用于 getLogs 轮询
+        let mut rpc_urls: Vec<String> = vec![ws_to_http(&self.config.polygon_ws_url)];
+        rpc_urls.extend(self.config.polygon_ws_fallback_urls.iter().map(|u| ws_to_http(u)));
 
-        // 连接失败退避：5s -> 10s -> 20s -> ... 封顶 300s，避免持续冲击限流端点
+        // 请求失败退避：5s -> 10s -> 20s -> ... 封顶 300s，避免持续冲击限流端点
         let mut backoff_secs: u64 = 5;
         const MAX_BACKOFF_SECS: u64 = 300;
         let mut url_index: usize = 0;
 
         loop {
-            let url = &ws_urls[url_index % ws_urls.len()];
+            let url = rpc_urls[url_index % rpc_urls.len()].clone();
 
-            match self.listen_once(&target_wallets, url).await {
+            match self.listen_once(&target_wallets, &url).await {
                 Ok(()) => {
-                    // 连接建立成功（随后因流结束/假死而重连）：重置退避，回到主 URL
+                    // 正常退出（listen_once 一般不会 Ok 返回）：重置退避
                     backoff_secs = 5;
-                    url_index = 0;
                 }
                 Err(e) => {
                     let err_msg = e.to_string();
+                    tracing::error!("❌ 轮询 RPC 异常: {} | {}", url, e);
                     if err_msg.contains("429") {
-                        tracing::error!("❌ RPC 限流(HTTP 429): {}", url);
-                        tracing::warn!(
-                            "  提示: 请检查是否同时运行了多个实例（旧进程/Zeabur 部署仍在连接），\
-                             或 Alchemy 免费额度并发连接数已满；429 会持续到连接释放/配额重置"
-                        );
-                        if ws_urls.len() > 1 {
-                            url_index = (url_index + 1) % ws_urls.len();
-                            tracing::warn!("  🔄 已切换到备用 RPC: {}", &ws_urls[url_index]);
-                        }
-                    } else {
-                        tracing::error!("❌ 监听连接异常: {}，重试中...", e);
+                        tracing::warn!("  ⚠️ 429 限流（多实例共用 RPC / 配额已满），轮询会自动切换备用 RPC");
                     }
-
-                    tracing::warn!("⏳ {} 秒后重连...", backoff_secs);
-                    tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                    if rpc_urls.len() > 1 {
+                        url_index = (url_index + 1) % rpc_urls.len();
+                        tracing::warn!("  🔄 已切换到备用 RPC: {}", rpc_urls[url_index]);
+                    }
+                    tracing::warn!("⏳ {} 秒后重试...", backoff_secs);
+                    sleep(Duration::from_secs(backoff_secs)).await;
                     backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                 }
             }
         }
     }
 
-    async fn listen_once(&self, target_wallets: &[Address], url: &str) -> Result<()> {
-        tracing::info!("🔗 连接到 Polygon WebSocket...");
-        tracing::info!("📌 URL: {}", url);
+    /// 用 eth_getLogs 从上次处理的区块轮询到最新，逐块处理目标成交事件。
+    /// getLogs 天然包含阻塞期间的所有事件，重连/429 后不会丢单。
+    async fn listen_once(&self, target_wallets: &[Address], rpc_url: &str) -> Result<()> {
+        tracing::info!("🔗 连接到 Polygon HTTP RPC（轮询模式）: {}", rpc_url);
+        let provider = ProviderBuilder::new().connect_http(rpc_url.parse::<reqwest::Url>()?);
 
-        let ws = WsConnect::new(url);
-        let provider = ProviderBuilder::new().connect_ws(ws).await?;
-
-        tracing::info!("✅ Polygon WebSocket 连接成功");
-
-        // 兼容 Polymarket 所有核心交易所合约（V1 + V2）
         let ctf_v1: Address = addresses::CTF_EXCHANGE.parse()?;
         let negrisk_v1: Address = addresses::NEGRISK_EXCHANGE.parse()?;
         let ctf_v2: Address = addresses::CTF_EXCHANGE_V2.parse()?;
         let negrisk_v2: Address = addresses::NEGRISK_EXCHANGE_V2.parse()?;
 
-        tracing::info!("🎯 开启多合约监听 [CTF V1, NegRisk V1, CTF V2, NegRisk V2]");
+        tracing::info!("🎯 多合约轮询 [CTF V1, NegRisk V1, CTF V2, NegRisk V2]");
         tracing::info!("🎯 目标监听钱包: {}", self.config.target_wallets.join(", "));
 
-        // 同时监听 V1 与 V2 的 OrderFilled 事件签名（两者 topic0 不同）
-        let filter = Filter::new()
-            .address(vec![ctf_v1, negrisk_v1, ctf_v2, negrisk_v2])
-            .event_signature(vec![event_sigs::order_filled_v1(), event_sigs::order_filled_v2()]);
+        let contracts = vec![ctf_v1, negrisk_v1, ctf_v2, negrisk_v2];
+        let sigs = vec![event_sigs::order_filled_v1(), event_sigs::order_filled_v2()];
 
-        let sub = provider.subscribe_logs(&filter).await?;
-        let mut stream = sub.into_stream();
+        // 上次已处理到的区块；未命中目标时 last_block 也会持续推进，保证不漏
+        let mut last_block = provider.get_block_number().await?;
+        tracing::info!("🚀 轮询已就位，从区块 {} 起监听...", last_block);
 
-        tracing::info!("🚀 监听器已就位，等待交易事件...");
-
-        // 一笔撮合会发出多个 OrderFilled 事件（每个 maker 单 + 1 个 taker 单汇总事件），
-        // 按 tx_hash 聚合成批，再挑选目标钱包自己的订单事件处理，避免重复跟单
-        let mut pending: Vec<Log> = Vec::new();
-        let mut pending_tx: Option<B256> = None;
-
-        // 心跳检测：长时间无数据推送则判定为连接假死，触发重连
         loop {
-            let res = timeout(Duration::from_secs(STALL_TIMEOUT_SECS), stream.next()).await;
-
-            let should_break = match &res {
-                Ok(None) => {
-                    tracing::warn!("⚠️ 监听流已结束，准备重连...");
-                    true
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        "⚠️ 超过 {} 秒无数据推送，WebSocket 可能假死，触发重连",
-                        STALL_TIMEOUT_SECS
-                    );
-                    true
-                }
-                Ok(Some(_)) => false,
+            let latest = match provider.get_block_number().await {
+                Ok(b) => b,
+                Err(e) => return Err(anyhow!("获取最新区块失败: {}", e)),
             };
 
-            if should_break {
-                // 重连前处理剩余批次，避免遗漏最后一批交易
-                if !pending.is_empty() {
-                    if let Err(e) = self.process_batch(&pending, target_wallets).await {
-                        tracing::error!("❌ 处理日志失败: {}", e);
+            if latest > last_block {
+                let from = last_block + 1;
+                let filter = Filter::new()
+                    .address(contracts.clone())
+                    .event_signature(sigs.clone())
+                    .from_block(BlockNumberOrTag::Number(from))
+                    .to_block(BlockNumberOrTag::Number(latest));
+
+                match provider.get_logs(&filter).await {
+                    Ok(logs) => {
+                        self.process_raw_logs(&logs, target_wallets).await?;
+                        last_block = latest;
                     }
+                    Err(e) => return Err(anyhow!("eth_getLogs 失败: {}", e)),
                 }
-                return Ok(());
+            } else {
+                // 链回滚时退到最新高度，避免从已被回滚的区块拉取
+                last_block = latest;
             }
 
-            let log = res.unwrap().unwrap();
-            let tx_hash = log.transaction_hash.unwrap_or_default();
+            sleep(Duration::from_millis(self.config.log_poll_interval)).await;
+        }
+    }
 
-            // 无条件打印收到的每条 OrderFilled（debug 级别，用于二分定位）
-            // 用 RUST_LOG=polymarket_copy_trader=debug 观察
-            let (ev_maker, ev_taker) = self.extract_parties(&log);
-            let hit = target_wallets.contains(&ev_maker)
-                || target_wallets.contains(&ev_taker);
-            tracing::debug!(
-                "📥 收到链上 OrderFilled | Tx: {:?} | maker: {:?} | taker: {:?} | 命中目标: {}",
-                log.transaction_hash, ev_maker, ev_taker, hit
-            );
+    /// 将一批日志按交易分组，每组（同一笔撮合）交给 process_batch 挑选目标事件
+    async fn process_raw_logs(&self, logs: &[Log], target_wallets: &[Address]) -> Result<()> {
+        let mut order: Vec<B256> = Vec::new();
+        let mut batches: HashMap<B256, Vec<Log>> = HashMap::new();
 
-            if pending_tx == Some(tx_hash) {
-                pending.push(log);
-            } else {
-                if !pending.is_empty() {
-                    if let Err(e) = self.process_batch(&pending, target_wallets).await {
-                        tracing::error!("❌ 处理日志失败: {}", e);
-                    }
-                }
-                pending = vec![log];
-                pending_tx = Some(tx_hash);
+        for l in logs {
+            let h = l.transaction_hash.unwrap_or_default();
+            if !batches.contains_key(&h) {
+                order.push(h);
+            }
+            batches.entry(h).or_default().push(l.clone());
+        }
+
+        for h in order {
+            if let Some(batch) = batches.get(&h) {
+                self.process_batch(batch, target_wallets).await?;
             }
         }
+        Ok(())
     }
 
     /// 从 topics 中直接提取 maker（topic2）和 taker（topic3），无需完整解码
