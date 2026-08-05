@@ -8,6 +8,9 @@ pub struct Config {
     /// Polygon WebSocket URL (Alchemy/QuickNode)
     pub polygon_ws_url: String,
 
+    /// 备用 WebSocket URL 列表（主 RPC 限流/不可用时自动切换）
+    pub polygon_ws_fallback_urls: Vec<String>,
+
     /// 目标钱包地址（要跟单的地址，兼容 EOA 与 Gnosis Safe Proxy）
     /// 支持逗号分隔的多个地址
     pub target_wallet: String,
@@ -77,6 +80,22 @@ impl Config {
 
         let config = Self {
             polygon_ws_url,
+
+            // 备用 WS：优先用 POLYGON_WS_FALLBACK 环境变量（逗号分隔），否则用内置公共端点
+            polygon_ws_fallback_urls: env::var("POLYGON_WS_FALLBACK")
+                .map(|s| {
+                    s.split(',')
+                        .map(|u| u.trim().to_string())
+                        .filter(|u| !u.is_empty())
+                        .collect()
+                })
+                .unwrap_or_else(|_| {
+                    vec![
+                        "wss://polygon-bor-rpc.publicnode.com".to_string(),
+                        "wss://polygon.api.onfinality.io/public".to_string(),
+                        "wss://polygon.drpc.org".to_string(),
+                    ]
+                }),
 
             target_wallet: env::var("TARGET_WALLET").context("TARGET_WALLET 环境变量未设置")?,
             target_wallets: env::var("TARGET_WALLETS")

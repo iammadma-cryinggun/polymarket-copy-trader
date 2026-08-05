@@ -54,20 +54,53 @@ impl Listener {
             .map(|w| w.parse::<Address>().context("目标钱包地址解析失败"))
             .collect::<Result<_>>()?;
 
-        // 持续监听，连接中断时自动重连
+        // 主 WS + 备用 WS（主 RPC 限流/不可用时自动轮换）
+        let mut ws_urls: Vec<String> = vec![self.config.polygon_ws_url.clone()];
+        ws_urls.extend(self.config.polygon_ws_fallback_urls.clone());
+
+        // 连接失败退避：5s -> 10s -> 20s -> ... 封顶 300s，避免持续冲击限流端点
+        let mut backoff_secs: u64 = 5;
+        const MAX_BACKOFF_SECS: u64 = 300;
+        let mut url_index: usize = 0;
+
         loop {
-            if let Err(e) = self.listen_once(&target_wallets).await {
-                tracing::error!("❌ 监听连接异常: {}，5 秒后重连...", e);
-                tokio::time::sleep(Duration::from_secs(5)).await;
+            let url = &ws_urls[url_index % ws_urls.len()];
+
+            match self.listen_once(&target_wallets, url).await {
+                Ok(()) => {
+                    // 连接建立成功（随后因流结束/假死而重连）：重置退避，回到主 URL
+                    backoff_secs = 5;
+                    url_index = 0;
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("429") {
+                        tracing::error!("❌ RPC 限流(HTTP 429): {}", url);
+                        tracing::warn!(
+                            "  提示: 请检查是否同时运行了多个实例（旧进程/Zeabur 部署仍在连接），\
+                             或 Alchemy 免费额度并发连接数已满；429 会持续到连接释放/配额重置"
+                        );
+                        if ws_urls.len() > 1 {
+                            url_index = (url_index + 1) % ws_urls.len();
+                            tracing::warn!("  🔄 已切换到备用 RPC: {}", &ws_urls[url_index]);
+                        }
+                    } else {
+                        tracing::error!("❌ 监听连接异常: {}，重试中...", e);
+                    }
+
+                    tracing::warn!("⏳ {} 秒后重连...", backoff_secs);
+                    tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                }
             }
         }
     }
 
-    async fn listen_once(&self, target_wallets: &[Address]) -> Result<()> {
+    async fn listen_once(&self, target_wallets: &[Address], url: &str) -> Result<()> {
         tracing::info!("🔗 连接到 Polygon WebSocket...");
-        tracing::info!("📌 URL: {}", &self.config.polygon_ws_url);
+        tracing::info!("📌 URL: {}", url);
 
-        let ws = WsConnect::new(&self.config.polygon_ws_url);
+        let ws = WsConnect::new(url);
         let provider = ProviderBuilder::new().connect_ws(ws).await?;
 
         tracing::info!("✅ Polygon WebSocket 连接成功");
