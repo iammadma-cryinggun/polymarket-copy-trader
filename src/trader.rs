@@ -238,7 +238,7 @@ impl CopyTrader {
             });
         }
 
-        let target_price = event.taker_amount as f64 / event.maker_amount as f64;
+        let target_price = event.maker_amount as f64 / event.taker_amount as f64;
         if target_price >= 0.90 {
             return Ok(CheckResult {
                 passed: false,
@@ -253,8 +253,8 @@ impl CopyTrader {
     }
 
     fn calculate_slippage(&self, event: &TradeEvent, orderbook: &OrderBook) -> Result<f64> {
-        let target_price = if event.maker_amount > 0 {
-            event.taker_amount as f64 / event.maker_amount as f64
+        let target_price = if event.taker_amount > 0 {
+            event.maker_amount as f64 / event.taker_amount as f64
         } else {
             0.0
         };

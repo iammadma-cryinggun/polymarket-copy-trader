@@ -359,8 +359,10 @@ impl Listener {
 
         let maker_amt: u64 = maker_amount;
         let taker_amt: u64 = taker_amount;
-        let entry_price = if maker_amt > 0 {
-            taker_amt as f64 / maker_amt as f64
+        // Polymarket 成交价 = makerAmountFilled / takerAmountFilled（恒在 [0,1]）。
+        // 之前用 taker/maker 会把廉价币算成 >1（如 11.11 / 0.09），导致价格判断全错。
+        let entry_price = if taker_amt > 0 {
+            maker_amt as f64 / taker_amt as f64
         } else {
             0.0
         };

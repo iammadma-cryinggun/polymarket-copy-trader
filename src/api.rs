@@ -105,9 +105,17 @@ impl PolymarketClient {
             .context("价格字段不存在")
     }
 
-    /// 根据 Token ID 获取市场信息
+    /// 根据 Token ID 获取市场信息。
+    ///
+    /// Gamma `/markets` 官方查询参数为 `clob_token_ids`（不是 `token_id`）。
+    /// 之前的 `?token_id=` 会被接口忽略，返回默认市场列表，且当前结构下 `tokens`
+    /// 数组未必存在，从而报“无token信息”。这里改用 `clob_token_ids`，并对
+    /// `tokens` 数组与 `clobTokenIds`(JSON 字符串) 两种字段做兼容解析。
     pub async fn get_market_by_token(&self, token_id: &str) -> Result<MarketInfo> {
-        let url = format!("{}/markets?token_id={}", self.gamma_url, token_id);
+        let url = format!(
+            "{}/markets?clob_token_ids={}",
+            self.gamma_url, token_id
+        );
 
         let response = self.http_client
             .get(&url)
@@ -115,26 +123,56 @@ impl PolymarketClient {
             .await
             .context("请求Gamma API失败")?;
 
-        let markets: Vec<serde_json::Value> = response.json().await.context("解析市场数据失败")?;
+        let markets: Vec<serde_json::Value> = response.json().await.context(format!(
+            "解析市场数据失败 (token_id={})",
+            &token_id[..std::cmp::min(20, token_id.len())]
+        ))?;
 
-        if markets.is_empty() {
-            anyhow::bail!("未找到市场");
-        }
-
-        let market = &markets[0];
+        // 优先挑选包含该 token 的市场；找不到就退回首个结果
+        let mine = token_id.to_string();
+        let market = markets
+            .iter()
+            .find(|m| self.market_contains_token(m, &mine))
+            .or_else(|| markets.first())
+            .context("未找到市场")?;
 
         let slug = market["slug"].as_str().unwrap_or("unknown").to_string();
         let question = market["question"].as_str().unwrap_or("").to_string();
         let condition_id = market["conditionId"].as_str().unwrap_or("").to_string();
 
-        let tokens = market["tokens"].as_array().context("无token信息")?;
-        let yes_token = tokens.get(0).and_then(|t| t["token_id"].as_str()).unwrap_or("").to_string();
-        let no_token = tokens.get(1).and_then(|t| t["token_id"].as_str()).unwrap_or("").to_string();
+        // 兼容两种 token 字段：`tokens` 数组 或 `clobTokenIds`(JSON 字符串)
+        let mut yes_token = String::new();
+        let mut no_token = String::new();
+        if let Some(tokens) = market["tokens"].as_array() {
+            let mut iter = tokens
+                .iter()
+                .map(|t| t["token_id"].as_str().unwrap_or("").to_string());
+            yes_token = iter.next().unwrap_or_default();
+            no_token = iter.next().unwrap_or_default();
+        } else if let Some(ids) = market["clobTokenIds"]
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        {
+            yes_token = ids.get(0).cloned().unwrap_or_default();
+            no_token = ids.get(1).cloned().unwrap_or_default();
+        }
 
-        let end_date = market["endDate"].as_str().unwrap_or("");
-        let end_time = chrono::DateTime::parse_from_rfc3339(end_date)
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0);
+        // 结束时间：兼容多种字段名，取第一个能解析的
+        let end_time = [
+            "endDateIso",
+            "end_date_iso",
+            "endDate",
+            "end_date",
+            "endTime",
+            "end_time",
+        ]
+        .iter()
+        .find_map(|f| {
+            market[f].as_str().and_then(|s| {
+                chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp())
+            })
+        })
+        .unwrap_or(0);
 
         let now = chrono::Utc::now().timestamp();
         let remaining_time = (end_time - now).max(0);
@@ -149,6 +187,25 @@ impl PolymarketClient {
             end_time,
             remaining_time,
         })
+    }
+
+    /// 判断某市场是否包含指定 token（通过 `tokens` 数组或 `clobTokenIds` 字符串）
+    fn market_contains_token(&self, market: &serde_json::Value, token_id: &str) -> bool {
+        if let Some(tokens) = market["tokens"].as_array() {
+            if tokens
+                .iter()
+                .any(|t| t["token_id"].as_str() == Some(token_id))
+            {
+                return true;
+            }
+        }
+        if let Some(ids) = market["clobTokenIds"]
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        {
+            return ids.iter().any(|id| id == token_id);
+        }
+        false
     }
 
     /// 下单
