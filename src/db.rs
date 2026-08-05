@@ -169,11 +169,8 @@ impl Database {
 
     pub fn get_stats(&self) -> Result<Stats> {
         let conn = self.inner.lock().unwrap();
-        let total_trades: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM target_trades",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_trades: i64 =
+            conn.query_row("SELECT COUNT(*) FROM target_trades", [], |row| row.get(0))?;
 
         let followed_trades: i64 = conn.query_row(
             "SELECT COUNT(*) FROM target_trades WHERE followed = 1",
@@ -192,5 +189,17 @@ impl Database {
             followed_trades,
             skipped_trades,
         })
+    }
+
+    /// 当日累计投入（USDC，按份数 × 成交价求和；created_at 为 UTC ISO 文本）
+    pub fn today_spend(&self) -> Result<f64> {
+        let conn = self.inner.lock().unwrap();
+        let sum: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(size * entry_price), 0) FROM copy_trades
+             WHERE status = 'filled' AND date(created_at) = date('now')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(sum)
     }
 }

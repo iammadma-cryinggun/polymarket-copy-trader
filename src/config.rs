@@ -30,6 +30,12 @@ pub struct Config {
     /// 最小剩余时间（秒）
     pub min_remaining_time: u64,
 
+    /// 1 分钟内最多跟单次数（熔断，防目标钱包刷单/做市）
+    pub max_orders_per_minute: u64,
+
+    /// 当日累计投入上限（USDC，熔断保护）
+    pub daily_spend_cap: f64,
+
     /// 数据库路径
     pub db_path: String,
 
@@ -122,6 +128,16 @@ impl Config {
                 .parse()
                 .context("MIN_REMAINING_TIME 解析失败")?,
 
+            max_orders_per_minute: env::var("MAX_ORDERS_PER_MINUTE")
+                .unwrap_or_else(|_| "2".to_string())
+                .parse()
+                .context("MAX_ORDERS_PER_MINUTE 解析失败")?,
+
+            daily_spend_cap: env::var("DAILY_SPEND_CAP")
+                .unwrap_or_else(|_| "50".to_string())
+                .parse()
+                .context("DAILY_SPEND_CAP 解析失败")?,
+
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "copy_trades.db".to_string()),
 
             clob_api_url: env::var("CLOB_API_URL")
@@ -172,6 +188,16 @@ impl Config {
         // 验证跟单金额
         if self.copy_trade_amount <= 0.0 {
             anyhow::bail!("COPY_TRADE_AMOUNT 应大于 0");
+        }
+
+        // 验证熔断频次
+        if self.max_orders_per_minute == 0 {
+            anyhow::bail!("MAX_ORDERS_PER_MINUTE 应大于 0");
+        }
+
+        // 验证熔断额度
+        if self.daily_spend_cap <= 0.0 {
+            anyhow::bail!("DAILY_SPEND_CAP 应大于 0");
         }
 
         tracing::info!("✅ 配置验证通过");

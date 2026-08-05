@@ -6,13 +6,17 @@ use crate::db::{CopyTrade, Database};
 use crate::listener::TradeEvent;
 use anyhow::Result;
 use chrono::Utc;
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// 跟单执行器
 pub struct CopyTrader {
     config: Config,
     db: Database,
     api_client: Arc<PolymarketClient>,
+    /// 1 分钟窗口内的下单时间戳（用于频次熔断）
+    order_timestamps: Mutex<VecDeque<Instant>>,
 }
 
 struct CheckResult {
@@ -39,6 +43,7 @@ impl CopyTrader {
             config,
             db,
             api_client,
+            order_timestamps: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -50,6 +55,17 @@ impl CopyTrader {
             &event.token_id[..20],
             start_time.elapsed().as_millis()
         );
+
+        // 熔断检查：频次 + 当日额度
+        let breaker = self.check_circuit_breaker()?;
+        if !breaker.passed {
+            tracing::warn!(
+                "🛑 [熔断拦截] {} | Token: {}",
+                breaker.reason,
+                &event.token_id[..20]
+            );
+            return Ok(());
+        }
 
         let market_info = match self.api_client.get_market_by_token(&event.token_id).await {
             Ok(m) => m,
@@ -149,9 +165,52 @@ impl CopyTrader {
 
         self.db.insert_copy_trade(&copy_trade)?;
 
+        // 记录本次下单时间（用于频次熔断）
+        self.order_timestamps.lock().unwrap().push_back(Instant::now());
+
         tracing::info!("📝 跟单记录已保存");
 
         Ok(())
+    }
+
+    /// 熔断检查：1 分钟频次上限 + 当日累计投入上限
+    fn check_circuit_breaker(&self) -> Result<CheckResult> {
+        // 1 分钟窗口内的下单次数
+        {
+            let mut timestamps = self.order_timestamps.lock().unwrap();
+            let cutoff = Instant::now() - Duration::from_secs(60);
+            timestamps.retain(|t| *t > cutoff);
+
+            if timestamps.len() >= self.config.max_orders_per_minute as usize {
+                return Ok(CheckResult {
+                    passed: false,
+                    reason: format!(
+                        "1 分钟内跟单次数 {} >= 上限 {}",
+                        timestamps.len(),
+                        self.config.max_orders_per_minute
+                    ),
+                });
+            }
+        }
+
+        // 当日累计投入
+        let today_spend = self.db.today_spend()?;
+        if today_spend + self.config.copy_trade_amount > self.config.daily_spend_cap {
+            return Ok(CheckResult {
+                passed: false,
+                reason: format!(
+                    "当日累计 ${:.2} + 本次 ${:.2} > 上限 ${:.2}",
+                    today_spend,
+                    self.config.copy_trade_amount,
+                    self.config.daily_spend_cap
+                ),
+            });
+        }
+
+        Ok(CheckResult {
+            passed: true,
+            reason: String::new(),
+        })
     }
 
     fn run_risk_checks(&self, event: &TradeEvent, market_info: &MarketInfo) -> Result<CheckResult> {
