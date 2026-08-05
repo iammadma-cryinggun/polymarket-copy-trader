@@ -68,10 +68,15 @@ pub struct Redeemer {
 }
 
 impl Redeemer {
-    pub fn new(_private_key: &str, config: RedeemConfig) -> Result<Self> {
-        // 从环境变量获取钱包地址
-        let wallet_address = std::env::var("WALLET_ADDRESS")
-            .unwrap_or_else(|_| "unknown".to_string());
+    pub fn new(private_key: &str, config: RedeemConfig) -> Result<Self> {
+        // 从私钥推导钱包地址
+        use alloy::signers::local::PrivateKeySigner;
+        let signer: PrivateKeySigner = private_key
+            .parse()
+            .context("PRIVATE_KEY 解析失败")?;
+        let wallet_address = format!("{:?}", signer.address());
+
+        info!("[Redeem] 🚀 赎回引擎初始化，钱包: {}", wallet_address);
 
         Ok(Self {
             config,
