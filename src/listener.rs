@@ -71,10 +71,13 @@ impl Listener {
         const MAX_BACKOFF_SECS: u64 = 300;
         let mut url_index: usize = 0;
 
+        // 上次已处理到的区块，跨重连/切换 RPC 持久化，保证不跳过、不回退
+        let mut last_block: u64 = 0;
+
         loop {
             let url = rpc_urls[url_index % rpc_urls.len()].clone();
 
-            match self.listen_once(&target_wallets, &url).await {
+            match self.listen_once(&target_wallets, &url, &mut last_block).await {
                 Ok(()) => {
                     // 正常退出（listen_once 一般不会 Ok 返回）：重置退避
                     backoff_secs = 5;
@@ -98,8 +101,13 @@ impl Listener {
     }
 
     /// 用 eth_getLogs 从上次处理的区块轮询到最新，逐块处理目标成交事件。
-    /// getLogs 天然包含阻塞期间的所有事件，重连/429 后不会丢单。
-    async fn listen_once(&self, target_wallets: &[Address], rpc_url: &str) -> Result<()> {
+    /// getLogs 天然包含阻塞期间的所有事件；last_block 由 run() 持久化，重连/切换 RPC 不丢不跳。
+    async fn listen_once(
+        &self,
+        target_wallets: &[Address],
+        rpc_url: &str,
+        last_block: &mut u64,
+    ) -> Result<()> {
         tracing::info!("🔗 连接到 Polygon HTTP RPC（轮询模式）: {}", rpc_url);
         let provider = ProviderBuilder::new().connect_http(rpc_url.parse::<reqwest::Url>()?);
 
@@ -114,9 +122,11 @@ impl Listener {
         let contracts = vec![ctf_v1, negrisk_v1, ctf_v2, negrisk_v2];
         let sigs = vec![event_sigs::order_filled_v1(), event_sigs::order_filled_v2()];
 
-        // 上次已处理到的区块；未命中目标时 last_block 也会持续推进，保证不漏
-        let mut last_block = provider.get_block_number().await?;
-        tracing::info!("🚀 轮询已就位，从区块 {} 起监听...", last_block);
+        // 首次连接时初始化，之后跨重连持久化，杜绝回退到最新区块而漏掉中间事件
+        if *last_block == 0 {
+            *last_block = provider.get_block_number().await?;
+        }
+        tracing::info!("🚀 轮询已就位，从区块 {} 起监听...", *last_block);
 
         loop {
             let latest = match provider.get_block_number().await {
@@ -124,8 +134,8 @@ impl Listener {
                 Err(e) => return Err(anyhow!("获取最新区块失败: {}", e)),
             };
 
-            if latest > last_block {
-                let from = last_block + 1;
+            if latest > *last_block {
+                let from = *last_block + 1;
                 let filter = Filter::new()
                     .address(contracts.clone())
                     .event_signature(sigs.clone())
@@ -134,22 +144,23 @@ impl Listener {
 
                 match provider.get_logs(&filter).await {
                     Ok(logs) => {
-                        self.process_raw_logs(&logs, target_wallets).await?;
-                        last_block = latest;
+                        self.process_raw_logs(&logs, target_wallets).await;
+                        *last_block = latest;
                     }
                     Err(e) => return Err(anyhow!("eth_getLogs 失败: {}", e)),
                 }
             } else {
                 // 链回滚时退到最新高度，避免从已被回滚的区块拉取
-                last_block = latest;
+                *last_block = latest;
             }
 
             sleep(Duration::from_millis(self.config.log_poll_interval)).await;
         }
     }
 
-    /// 将一批日志按交易分组，每组（同一笔撮合）交给 process_batch 挑选目标事件
-    async fn process_raw_logs(&self, logs: &[Log], target_wallets: &[Address]) -> Result<()> {
+    /// 将一批日志按交易分组，每组（同一笔撮合）交给 process_batch 挑选目标事件。
+    /// 单个批次处理失败只记日志并继续，不让一条坏数据阻塞/中止整个轮询。
+    async fn process_raw_logs(&self, logs: &[Log], target_wallets: &[Address]) {
         let mut order: Vec<B256> = Vec::new();
         let mut batches: HashMap<B256, Vec<Log>> = HashMap::new();
 
@@ -163,10 +174,11 @@ impl Listener {
 
         for h in order {
             if let Some(batch) = batches.get(&h) {
-                self.process_batch(batch, target_wallets).await?;
+                if let Err(e) = self.process_batch(batch, target_wallets).await {
+                    tracing::warn!("⚠️ 处理交易批次失败（已跳过）: {}", e);
+                }
             }
         }
-        Ok(())
     }
 
     /// 从 topics 中直接提取 maker（topic2）和 taker（topic3），无需完整解码
