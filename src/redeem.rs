@@ -54,7 +54,7 @@ pub struct RedeemConfig {
     pub scan_interval_secs: u64,
     /// 最小赎回金额（当前价值低于该值跳过，节省 Gas）
     pub min_redeem_amount: f64,
-    /// Polygon HTTP RPC URL（用于发送赎回交易）
+    /// Polygon HTTP RPC URL（用于发送赎回交易；留空则自动探测公共端点）
     pub polygon_rpc_url: String,
 }
 
@@ -101,9 +101,16 @@ pub struct Redeemer {
     http_client: HttpClient,
     private_key: String,
     wallet_address: Address,
-    /// 自定义 RPC 地址（从环境变量覆盖）
-    rpc_url: String,
+    /// 候选 Polygon RPC 列表（按顺序探测，选第一个可用者）
+    rpc_urls: Vec<String>,
 }
+
+/// 可用的公共 Polygon RPC（polygon-rpc.com 已停用，排除）
+const PUBLIC_RPCS: [&str; 3] = [
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.api.onfinality.io/public",
+    "https://polygon.drpc.org",
+];
 
 impl Redeemer {
     pub fn new(private_key: &str, config: RedeemConfig) -> Result<Self> {
@@ -112,22 +119,78 @@ impl Redeemer {
             .context("PRIVATE_KEY 解析失败")?;
         let wallet_address = signer.address();
 
-        let rpc_url = if !config.polygon_rpc_url.is_empty() {
-            config.polygon_rpc_url.clone()
-        } else {
-            // 从 POLYGON_RPC_URL 环境变量读取，否则使用公共 RPC
-            std::env::var("POLYGON_RPC_URL").unwrap_or_else(|_| {
-                "https://polygon-rpc.com".to_string()
-            })
-        };
+        let mut rpc_urls: Vec<String> = Vec::new();
+        // 优先使用用户显式配置的 RPC
+        if !config.polygon_rpc_url.is_empty() {
+            rpc_urls.push(config.polygon_rpc_url.clone());
+        }
+        if let Ok(custom) = std::env::var("POLYGON_RPC_URL") {
+            if !custom.is_empty() {
+                rpc_urls.push(custom);
+            }
+        }
+        // 追加可用的公共候选（作为兜底）
+        rpc_urls.extend(PUBLIC_RPCS.iter().map(|u| u.to_string()));
 
         Ok(Self {
             config,
             http_client: HttpClient::new(),
             private_key: private_key.to_string(),
             wallet_address,
-            rpc_url,
+            rpc_urls,
         })
+    }
+
+    /// 探测并返回第一个可用的 RPC URL（依次尝试，全部失败则报错）
+    async fn select_rpc_url(&self) -> Result<String> {
+        let mut last_err: Option<anyhow::Error> = None;
+
+        for url in &self.rpc_urls {
+            info!("[Redeem] 🔍 测试 RPC: {}", url);
+
+            // 用简单的 JSON-RPC 请求测试连通性
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .ok();
+
+            if let Some(client) = client {
+                let body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",
+                    "params": [],
+                    "id": 1
+                });
+
+                match client
+                    .post(url)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        info!("[Redeem] ✅ RPC 可用: {}", url);
+                        return Ok(url.clone());
+                    }
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let err_msg = resp.text().await.unwrap_or_default();
+                        if status.as_u16() == 401 || status.as_u16() == 403 {
+                            warn!("[Redeem] ⚠️ RPC 已禁用 (API key失效): {} | {}", url, err_msg.chars().take(100).collect::<String>());
+                        } else {
+                            warn!("[Redeem] ⚠️ RPC 返回错误 {}: {}", url, status);
+                        }
+                        last_err = Some(anyhow::anyhow!("RPC error {}: {}", url, status));
+                    }
+                    Err(e) => {
+                        warn!("[Redeem] ⚠️ RPC 连接失败 {}: {}", url, e);
+                        last_err = Some(e.into());
+                    }
+                }
+            }
+        }
+
+        Err(last_err.context("所有 Polygon RPC 均不可用")?)
     }
 
     /// 启动后台扫描赎回循环
@@ -169,7 +232,8 @@ impl Redeemer {
             );
         }
 
-        // 创建带钱包的 provider（每个扫描周期复用）
+        // 探测可用 RPC 并创建带钱包的 provider（每个扫描周期复用）
+        let rpc_url = self.select_rpc_url().await?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
             .wallet(EthereumWallet::from(
@@ -178,7 +242,7 @@ impl Redeemer {
                     .context("PRIVATE_KEY 解析失败")?
                     .with_chain_id(Some(POLYGON_CHAIN_ID)),
             ))
-            .connect_http(reqwest::Url::parse(&self.rpc_url).context("RPC URL 解析失败")?);
+            .connect_http(reqwest::Url::parse(&rpc_url).context("RPC URL 解析失败")?);
 
         for (i, position) in positions.iter().enumerate() {
             info!(
