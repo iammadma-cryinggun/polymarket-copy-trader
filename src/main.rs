@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("polymarket_copy_trader=info".parse()?)
+                .add_directive("polymarket_copy_trader=debug".parse()?)
         )
         .init();
 
