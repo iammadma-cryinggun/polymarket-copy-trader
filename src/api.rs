@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use alloy::signers::{Signer, local::LocalSigner};
 use polymarket_client_sdk_v2::clob::types::request::BalanceAllowanceRequest;
-use polymarket_client_sdk_v2::clob::types::{Amount, Side, SignatureType};
+use polymarket_client_sdk_v2::clob::types::{Amount, OrderType, Side, SignatureType};
 use polymarket_client_sdk_v2::clob::{Client, Config};
 use polymarket_client_sdk_v2::types::{Decimal, U256};
 use polymarket_client_sdk_v2::POLYGON;
@@ -319,12 +319,13 @@ impl PolymarketClient {
             size_usdc
         );
 
-        // 创建市价单
+        // 创建市价单 (FOK: 全部成交或取消，避免挂单站岗)
         let market_order = client
             .market_order()
             .token_id(token_id_u256)
             .amount(amount)
             .side(trade_side)
+            .order_type(OrderType::FOK)
             .build()
             .await?;
 
