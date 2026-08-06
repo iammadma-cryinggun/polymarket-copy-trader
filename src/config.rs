@@ -168,7 +168,7 @@ impl Config {
 
             redeem_enabled: env::var("REDEEM_ENABLED")
                 .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-                .unwrap_or(false),
+                .unwrap_or(true), // 默认启用赎回
 
             redeem_scan_interval: env::var("REDEEM_SCAN_INTERVAL")
                 .unwrap_or_else(|_| "300".to_string())
