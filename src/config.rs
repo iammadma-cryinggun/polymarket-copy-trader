@@ -45,6 +45,9 @@ pub struct Config {
     /// 当日累计投入上限（USDC，熔断保护）
     pub daily_spend_cap: f64,
 
+    /// 反向跟单（目标买YES时买NO，目标买NO时买YES）
+    pub reverse_trade: bool,
+
     /// 数据库路径
     pub db_path: String,
 
@@ -160,6 +163,10 @@ impl Config {
                 .unwrap_or_else(|_| "1000000".to_string()) // 默认无上限
                 .parse()
                 .context("DAILY_SPEND_CAP 解析失败")?,
+
+            reverse_trade: env::var("REVERSE_TRADE")
+                .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                .unwrap_or(false), // 默认正常跟单
 
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "copy_trades.db".to_string()),
 

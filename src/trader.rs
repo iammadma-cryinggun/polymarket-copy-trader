@@ -93,6 +93,22 @@ impl CopyTrader {
             market_info.remaining_time
         );
 
+        // 反向跟单：切换到另一个 token
+        let trade_token_id = if self.config.reverse_trade {
+            let opposite_token = if event.token_id == market_info.yes_token {
+                &market_info.no_token
+            } else {
+                &market_info.yes_token
+            };
+            tracing::info!("🔄 [反向跟单] 目标买 {} → 我买 {}",
+                if event.token_id == market_info.yes_token { "YES" } else { "NO" },
+                if opposite_token == &market_info.yes_token { "YES" } else { "NO" }
+            );
+            opposite_token.clone()
+        } else {
+            event.token_id.clone()
+        };
+
         let check_result = self.run_risk_checks(&event, &market_info)?;
 
         if !check_result.passed {
@@ -104,7 +120,7 @@ impl CopyTrader {
             return Ok(());
         }
 
-        let orderbook = match self.api_client.fetch_best_prices(&event.token_id).await {
+        let orderbook = match self.api_client.fetch_best_prices(&trade_token_id).await {
             Ok(ob) => ob,
             Err(e) => {
                 tracing::warn!("❌ 获取盘口失败: {}", e);
@@ -134,13 +150,13 @@ impl CopyTrader {
 
         tracing::info!(
             "🚀 [执行跟单] Token: {} | 价格: {:.4} | 金额: ${:.2}",
-            &event.token_id[..20],
+            &trade_token_id[..20],
             order_price,
             self.config.copy_trade_amount
         );
 
         let result = match self.api_client.place_order(
-            &event.token_id,
+            &trade_token_id,
             "BUY",
             order_price,
             self.config.copy_trade_amount,
