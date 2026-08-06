@@ -171,7 +171,7 @@ impl Config {
                 .unwrap_or(true), // 默认启用赎回
 
             redeem_scan_interval: env::var("REDEEM_SCAN_INTERVAL")
-                .unwrap_or_else(|_| "300".to_string())
+                .unwrap_or_else(|_| "60".to_string()) // 默认 60 秒扫描一次
                 .parse()
                 .context("REDEEM_SCAN_INTERVAL 解析失败")?,
 
