@@ -157,7 +157,7 @@ impl Config {
                 .context("MAX_ORDERS_PER_MINUTE 解析失败")?,
 
             daily_spend_cap: env::var("DAILY_SPEND_CAP")
-                .unwrap_or_else(|_| "50".to_string())
+                .unwrap_or_else(|_| "1000000".to_string()) // 默认无上限
                 .parse()
                 .context("DAILY_SPEND_CAP 解析失败")?,
 
