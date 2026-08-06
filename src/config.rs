@@ -142,7 +142,7 @@ impl Config {
                 .context("COPY_TRADE_AMOUNT 解析失败")?,
 
             max_slippage: env::var("MAX_SLIPPAGE")
-                .unwrap_or_else(|_| "0.15".to_string())
+                .unwrap_or_else(|_| "1.0".to_string()) // 默认100%容忍（跟单模式不限制滑点）
                 .parse()
                 .context("MAX_SLIPPAGE 解析失败")?,
 
