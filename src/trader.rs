@@ -148,19 +148,21 @@ impl CopyTrader {
 
         let order_price = orderbook.best_ask + 0.01;
 
-        // 根据目标份额决定下单金额
-        let trade_amount = if event.taker_amount <= self.config.copy_trade_threshold {
+        // 根据目标实际花费决定下单金额
+        // maker_amount 是实际花费（微单位），转换成 USDC
+        let target_spend_usdc = event.maker_amount as f64 / 1_000_000.0;
+        let trade_amount = if target_spend_usdc <= self.config.copy_trade_threshold as f64 {
             self.config.copy_trade_amount_small
         } else {
             self.config.copy_trade_amount_large
         };
 
         tracing::info!(
-            "🚀 [执行跟单] Token: {} | 价格: {:.4} | 金额: ${:.2} (目标份额: {})",
+            "🚀 [执行跟单] Token: {} | 价格: {:.4} | 金额: ${:.2} (目标花费: ${:.2})",
             &trade_token_id[..20],
             order_price,
             trade_amount,
-            event.taker_amount
+            target_spend_usdc
         );
 
         let result = match self.api_client.place_order(
