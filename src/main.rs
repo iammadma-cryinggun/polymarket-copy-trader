@@ -82,7 +82,9 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     tracing::info!("✅ 配置加载成功");
     tracing::info!("🎯 目标钱包: {}", config.target_wallet);
-    tracing::info!("💰 跟单金额: ${:.2}", config.copy_trade_amount);
+    tracing::info!("💰 跟单金额: ${:.2} (≤{}) / ${:.2} (>{})",
+        config.copy_trade_amount_small, config.copy_trade_threshold,
+        config.copy_trade_amount_large, config.copy_trade_threshold);
 
     // Database 已经是线程安全的（内部用 Arc<Mutex>）
     let db = Database::new(&config.db_path)?;

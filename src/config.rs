@@ -30,9 +30,6 @@ pub struct Config {
     /// 资金地址（代理/Safe/存款钱包时需设置；EOA 留空）
     pub funder: Option<String>,
 
-    /// 跟单金额（USDC）- 固定金额模式（已废弃，改用分段模式）
-    pub copy_trade_amount: f64,
-
     /// 小单金额（目标份额 ≤ threshold）
     pub copy_trade_amount_small: f64,
 
@@ -147,11 +144,6 @@ impl Config {
                 .context("SIGNATURE_TYPE 解析失败")?,
 
             funder: env::var("FUNDER_ADDRESS").ok().filter(|s| !s.is_empty()),
-
-            copy_trade_amount: env::var("COPY_TRADE_AMOUNT")
-                .unwrap_or_else(|_| "10".to_string())
-                .parse()
-                .context("COPY_TRADE_AMOUNT 解析失败")?,
 
             copy_trade_amount_small: env::var("COPY_TRADE_AMOUNT_SMALL")
                 .unwrap_or_else(|_| "1.0".to_string())

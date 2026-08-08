@@ -242,13 +242,6 @@ impl CopyTrader {
             });
         }
 
-        if self.config.copy_trade_amount <= 0.0 {
-            return Ok(CheckResult {
-                passed: false,
-                reason: "跟单金额无效".to_string(),
-            });
-        }
-
         let target_price = event.maker_amount as f64 / event.taker_amount as f64;
 
         Ok(CheckResult {
