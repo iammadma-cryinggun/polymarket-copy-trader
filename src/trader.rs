@@ -148,18 +148,26 @@ impl CopyTrader {
 
         let order_price = orderbook.best_ask + 0.01;
 
+        // 根据目标份额决定下单金额
+        let trade_amount = if event.taker_amount <= self.config.copy_trade_threshold {
+            self.config.copy_trade_amount_small
+        } else {
+            self.config.copy_trade_amount_large
+        };
+
         tracing::info!(
-            "🚀 [执行跟单] Token: {} | 价格: {:.4} | 金额: ${:.2}",
+            "🚀 [执行跟单] Token: {} | 价格: {:.4} | 金额: ${:.2} (目标份额: {})",
             &trade_token_id[..20],
             order_price,
-            self.config.copy_trade_amount
+            trade_amount,
+            event.taker_amount
         );
 
         let result = match self.api_client.place_order(
             &trade_token_id,
             "BUY",
             order_price,
-            self.config.copy_trade_amount,
+            trade_amount,
         ).await {
             Ok(r) => r,
             Err(e) => {

@@ -353,6 +353,12 @@ def main(loop=True, interval_secs=60, force=False):
             else:
                 failed_count += 1
 
+        # 等待 nonce 同步（赎回多笔交易后需要等待）
+        if success_count > 0:
+            print("\n⏳ 等待 3 秒让 nonce 同步...")
+            import time
+            time.sleep(3)
+
         print()
         print("[3/3] 检查并按配置兑换 USDCE -> pUSD...")
         conversion_success = False

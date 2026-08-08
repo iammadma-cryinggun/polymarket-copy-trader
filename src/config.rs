@@ -30,8 +30,17 @@ pub struct Config {
     /// 资金地址（代理/Safe/存款钱包时需设置；EOA 留空）
     pub funder: Option<String>,
 
-    /// 跟单金额（USDC）
+    /// 跟单金额（USDC）- 固定金额模式（已废弃，改用分段模式）
     pub copy_trade_amount: f64,
+
+    /// 小单金额（目标份额 ≤ threshold）
+    pub copy_trade_amount_small: f64,
+
+    /// 大单金额（目标份额 > threshold）
+    pub copy_trade_amount_large: f64,
+
+    /// 份额分界线
+    pub copy_trade_threshold: u64,
 
     /// 最大滑点（0.15 = 15%）
     pub max_slippage: f64,
@@ -144,6 +153,21 @@ impl Config {
                 .parse()
                 .context("COPY_TRADE_AMOUNT 解析失败")?,
 
+            copy_trade_amount_small: env::var("COPY_TRADE_AMOUNT_SMALL")
+                .unwrap_or_else(|_| "1.0".to_string())
+                .parse()
+                .context("COPY_TRADE_AMOUNT_SMALL 解析失败")?,
+
+            copy_trade_amount_large: env::var("COPY_TRADE_AMOUNT_LARGE")
+                .unwrap_or_else(|_| "2.0".to_string())
+                .parse()
+                .context("COPY_TRADE_AMOUNT_LARGE 解析失败")?,
+
+            copy_trade_threshold: env::var("COPY_TRADE_THRESHOLD")
+                .unwrap_or_else(|_| "50".to_string())
+                .parse()
+                .context("COPY_TRADE_THRESHOLD 解析失败")?,
+
             max_slippage: env::var("MAX_SLIPPAGE")
                 .unwrap_or_else(|_| "1.0".to_string()) // 默认100%容忍（跟单模式不限制滑点）
                 .parse()
@@ -215,17 +239,30 @@ impl Config {
             anyhow::bail!("MAX_SLIPPAGE 应在 (0.0, 1.0] 范围内");
         }
 
-        // 验证跟单金额
-        if self.copy_trade_amount <= 0.0 {
-            anyhow::bail!("COPY_TRADE_AMOUNT 应大于 0");
+        // 验证跟单金额（分段模式）
+        if self.copy_trade_amount_small <= 0.0 {
+            anyhow::bail!("COPY_TRADE_AMOUNT_SMALL 应大于 0");
+        }
+        if self.copy_trade_amount_large <= 0.0 {
+            anyhow::bail!("COPY_TRADE_AMOUNT_LARGE 应大于 0");
+        }
+        if self.copy_trade_threshold == 0 {
+            anyhow::bail!("COPY_TRADE_THRESHOLD 应大于 0");
         }
 
         // Polymarket CLOB 单笔订单下限为 5 USDC；低于此值会被拒单
-        if self.copy_trade_amount < 5.0 {
+        if self.copy_trade_amount_small < 5.0 {
             tracing::warn!(
-                "⚠️ COPY_TRADE_AMOUNT={:.2} 低于 Polymarket CLOB 最小下单金额 $5，\
+                "⚠️ COPY_TRADE_AMOUNT_SMALL={:.2} 低于 Polymarket CLOB 最小下单金额 $5，\
                  实盘下单会被拒单（监测/纸面模式无影响）",
-                self.copy_trade_amount
+                self.copy_trade_amount_small
+            );
+        }
+        if self.copy_trade_amount_large < 5.0 {
+            tracing::warn!(
+                "⚠️ COPY_TRADE_AMOUNT_LARGE={:.2} 低于 Polymarket CLOB 最小下单金额 $5，\
+                 实盘下单会被拒单（监测/纸面模式无影响）",
+                self.copy_trade_amount_large
             );
         }
 
