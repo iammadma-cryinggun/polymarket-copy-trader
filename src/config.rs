@@ -30,13 +30,13 @@ pub struct Config {
     /// 资金地址（代理/Safe/存款钱包时需设置；EOA 留空）
     pub funder: Option<String>,
 
-    /// 小单金额（目标 ≤ threshold USDC）
+    /// 小单金额（目标份额 ≤ threshold）
     pub copy_trade_amount_small: f64,
 
-    /// 大单金额（目标 > threshold USDC）
+    /// 大单金额（目标份额 > threshold）
     pub copy_trade_amount_large: f64,
 
-    /// 分界线（目标 USDC 金额）
+    /// 份额分界线
     pub copy_trade_threshold: u64,
 
     /// 最大滑点（0.15 = 15%）
