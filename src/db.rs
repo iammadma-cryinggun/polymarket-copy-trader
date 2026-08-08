@@ -129,11 +129,11 @@ impl Database {
         Ok(id)
     }
 
-    pub fn target_trade_exists(&self, tx_hash: &str) -> Result<bool> {
+    pub fn target_trade_exists(&self, tx_hash: &str, token_id: &str) -> Result<bool> {
         let conn = self.inner.lock().unwrap();
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM target_trades WHERE tx_hash = ?1",
-            params![tx_hash],
+            "SELECT COUNT(*) FROM target_trades WHERE tx_hash = ?1 AND token_id = ?2",
+            params![tx_hash, token_id],
             |row| row.get(0),
         )?;
         Ok(count > 0)

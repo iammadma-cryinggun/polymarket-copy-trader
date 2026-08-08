@@ -399,8 +399,8 @@ impl Listener {
             follow_reason: None,
         };
 
-        // 同一笔交易只跟单一次（单笔撮合会发出多个 OrderFilled 事件）
-        if self.db.target_trade_exists(&trade_event.tx_hash)? {
+        // 同一笔交易 + 同一个 token 只跟单一次
+        if self.db.target_trade_exists(&trade_event.tx_hash, &trade_event.token_id)? {
             return Ok(());
         }
 
