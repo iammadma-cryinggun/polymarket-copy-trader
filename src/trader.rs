@@ -207,40 +207,9 @@ impl CopyTrader {
         Ok(())
     }
 
-    /// 熔断检查：1 分钟频次上限 + 当日累计投入上限
+    /// 熔断检查：已禁用
     fn check_circuit_breaker(&self) -> Result<CheckResult> {
-        // 1 分钟窗口内的下单次数
-        {
-            let mut timestamps = self.order_timestamps.lock().unwrap();
-            let cutoff = Instant::now() - Duration::from_secs(60);
-            timestamps.retain(|t| *t > cutoff);
-
-            if timestamps.len() >= self.config.max_orders_per_minute as usize {
-                return Ok(CheckResult {
-                    passed: false,
-                    reason: format!(
-                        "1 分钟内跟单次数 {} >= 上限 {}",
-                        timestamps.len(),
-                        self.config.max_orders_per_minute
-                    ),
-                });
-            }
-        }
-
-        // 当日累计投入
-        let today_spend = self.db.today_spend()?;
-        if today_spend + self.config.copy_trade_amount > self.config.daily_spend_cap {
-            return Ok(CheckResult {
-                passed: false,
-                reason: format!(
-                    "当日累计 ${:.2} + 本次 ${:.2} > 上限 ${:.2}",
-                    today_spend,
-                    self.config.copy_trade_amount,
-                    self.config.daily_spend_cap
-                ),
-            });
-        }
-
+        // 熔断检查已禁用
         Ok(CheckResult {
             passed: true,
             reason: String::new(),
